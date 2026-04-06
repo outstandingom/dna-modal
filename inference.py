@@ -8,13 +8,15 @@ def main():
     obs = env.reset()
     print(f"[STEP] Observation: {obs}")
 
-    total_reward = 0.0
+    # Episode: 3 steps
     step = 0
+    total_reward = 0.0
     while not env.state().get("step", 0) == 3:
         state = env.state()
         step_name = state["step_name"]
-        # Simple agent heuristics
+        # Simple agent heuristics based on observation
         if step_name == "identify":
+            # Extract key concept from input (crude)
             words = obs.lower().split()
             if "login" in words or "account" in words:
                 action = "login issue"
@@ -29,6 +31,7 @@ def main():
             else:
                 action = "hardware failure"
         elif step_name == "relate":
+            # Use the identified concept to guess a relation
             if "login" in obs.lower() or "account" in obs.lower():
                 action = "account locked"
             elif "billing" in obs.lower() or "payment" in obs.lower():
