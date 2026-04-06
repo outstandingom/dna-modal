@@ -1,19 +1,25 @@
 name: knowledge_graph_env
-description: AI reasoning environment for customer support intent classification and query understanding. Dynamic tasks, multi-step episodes, fine-grained rewards using FAISS and reasoning engine.
+description: Customer support ticket triage for a SaaS company. The agent must (1) classify the issue type, (2) identify the correct internal KB article relation, and (3) suggest a resolution. Used to train automated support agents.
 version: "1.0.0"
 tasks:
-  - id: "support_triage_easy"
-    name: "Basic Intent Identification"
-    difficulty: "easy"
+  - id: easy
+    name: "Intent Identification"
     description: "Identify the primary support category from a direct user query."
-  - id: "support_triage_medium"
+    grader: "task_easy"
+    input_example: "I can't log in to my account"
+    expected_output: "login issue"
+  - id: medium
     name: "Relational Mapping"
-    difficulty: "medium"
     description: "Map the identified intent to a related technical concept in the knowledge graph."
-  - id: "support_triage_hard"
+    grader: "task_medium"
+    input_example: "My bill is wrong"
+    expected_output: "refund"
+  - id: hard
     name: "Multi-hop Resolution"
-    difficulty: "hard"
     description: "Provide the correct resolution action based on multi-hop reasoning within the graph."
+    grader: "task_hard"
+    input_example: "Locked out after failed payment and account lock"
+    expected_output: "reset password"
 metadata:
   framework: "FastAPI"
   vector_store: "FAISS"
