@@ -7,7 +7,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-# Force fresh start – delete any old corrupted data
+# Delete any previously persisted data (safety)
 RUN rm -rf /app/brain_data
 
 RUN mkdir -p /app/brain_data
