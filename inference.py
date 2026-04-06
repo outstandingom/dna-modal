@@ -1,10 +1,10 @@
 import os
 from knowledge_graph_env import KnowledgeGraphEnv
 
-# Required by pre-submission checklist
+# Required by validator – use their injected variables
 API_BASE_URL = os.getenv("API_BASE_URL", "https://api.openai.com/v1")
+API_KEY = os.getenv("API_KEY", "")  # Not HF_TOKEN
 MODEL_NAME = os.getenv("MODEL_NAME", "gpt-3.5-turbo")
-HF_TOKEN = os.getenv("HF_TOKEN", "")   # No default key
 
 def main():
     env = KnowledgeGraphEnv()
