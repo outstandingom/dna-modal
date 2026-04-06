@@ -14,3 +14,4 @@ tasks:
 metadata:
   framework: "FastAPI"
   vector_store: "FAISS"
+  embedding_dims: 16
