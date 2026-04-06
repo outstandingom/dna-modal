@@ -28,7 +28,6 @@ BATCH_SIZE = 32
 TRAIN_INTERVAL_SEC = 10
 PERSIST_DIR = "./brain_data"
 
-# Ensure fresh directory (old corrupted files will be ignored)
 os.makedirs(PERSIST_DIR, exist_ok=True)
 
 API_BASE_URL = os.getenv("API_BASE_URL", "https://api.openai.com/v1")
@@ -39,38 +38,24 @@ openai_client = openai.OpenAI(base_url=API_BASE_URL, api_key=HF_TOKEN) if HF_TOK
 STOP_WORDS = {"the","and","for","are","but","not","you","all","can","had","her","was","one","our","out","has","have","from","they","been","said","each","which","their","will","other","about","many","then","them","these","some","would","make","like","into","time","very","when","come","could","than","its","also","back","after","two","how","what","where","who","why","this","that","with"}
 
 # ============================================================
-# DynamicOntology (with OpenAI)
+# DynamicOntology (deterministic fallback – no LLM for grading)
 # ============================================================
 class DynamicOntology:
     def __init__(self):
         self.concept_to_features: Dict[str, List[str]] = {}
         self.feature_to_concepts: Dict[str, List[str]] = defaultdict(list)
-        self.llm_enabled = openai_client is not None
+        # LLM disabled for deterministic grading – only fallback
+        self.llm_enabled = False
 
     async def get_features_llm(self, concept: str) -> List[str]:
-        if not self.llm_enabled:
-            return [concept]
-        try:
-            response = openai_client.chat.completions.create(
-                model=MODEL_NAME,
-                messages=[
-                    {"role": "system", "content": "You are a helpful assistant that extracts physical and semantic features of concepts. Return a comma-separated list of up to 5 features."},
-                    {"role": "user", "content": f"List the most important physical and semantic features of '{concept}'. Return only the list."}
-                ],
-                temperature=0.3,
-                max_tokens=100
-            )
-            text = response.choices[0].message.content
-            features = [f.strip().lower() for f in text.split(",")]
-            return features[:5]
-        except Exception:
-            return [concept]
+        # Deterministic fallback: just the concept itself
+        return [concept]
 
     async def add_concept(self, concept: str, context: str = ""):
         concept_low = concept.lower()
         if concept_low in self.concept_to_features:
             return
-        features = await self.get_features_llm(f"{context} {concept}" if context else concept)
+        features = [concept_low]  # deterministic
         self.concept_to_features[concept_low] = features
         for f in features:
             self.feature_to_concepts[f].append(concept_low)
@@ -376,18 +361,15 @@ class ConceptMemory:
         self._rebuild_index()
 
 # ============================================================
-# Persistence Manager - ALWAYS FRESH (ignores old files)
+# Persistence Manager – always fresh
 # ============================================================
 class PersistenceManager:
     @staticmethod
     def save_all(concept_memory: ConceptMemory, feature_registry: FeatureRegistry, letter_vec: LetterVectors):
-        # Optional: you can keep saving, but loading will be ignored
-        pass
+        pass  # no persistence for deterministic runs
 
     @staticmethod
     def load_all() -> Tuple[ConceptMemory, FeatureRegistry, LetterVectors, DynamicOntology]:
-        # Always start with a clean, fresh environment
-        # This completely avoids the KeyError from corrupted pickles
         ontology = DynamicOntology()
         feature_registry = FeatureRegistry(ontology)
         letter_vec = LetterVectors()
@@ -395,7 +377,7 @@ class PersistenceManager:
         return concept_memory, feature_registry, letter_vec, ontology
 
 # ============================================================
-# Background Trainer
+# Background Trainer (optional, kept for learning)
 # ============================================================
 class ContinuousTrainer:
     def __init__(self, concept_memory: ConceptMemory, feature_registry: FeatureRegistry, letter_vec: LetterVectors, interval_sec: int = TRAIN_INTERVAL_SEC):
@@ -427,22 +409,18 @@ class ContinuousTrainer:
                 if a in self.concept_memory.concepts and b in self.concept_memory.concepts:
                     self.concept_memory.concepts[a].move_towards(self.concept_memory.concepts[b])
             self.concept_memory._rebuild_index()
-            # Optional: no persistence needed
 
 # ============================================================
 # KnowledgeGraphEnv (Main Environment)
 # ============================================================
 class KnowledgeGraphEnv:
     def __init__(self):
-        # Load all components (always fresh)
         self.concept_memory, self.feature_registry, self.letter_vec, self.ontology = PersistenceManager.load_all()
         self.reasoning_engine = ReasoningEngine(self.concept_memory)
-        # Seed initial concepts if empty
         self._seed_initial_concepts()
-        # Start background trainer
         self.trainer = ContinuousTrainer(self.concept_memory, self.feature_registry, self.letter_vec)
         self.trainer.start()
-        # Episode state
+        # Current episode state (used for the 3-step interaction)
         self.current_task = None
         self.current_step = 0
         self.episode_reward = 0.0
@@ -468,12 +446,37 @@ class KnowledgeGraphEnv:
         self.concept_memory.add_relationship("slow performance", "crash")
         self.concept_memory.add_relationship("feature request", "enhancement")
 
+    # -----------------------------------------------------------------
+    # 3 independent tasks for the hackathon (each returns a score 0.0-1.0)
+    # -----------------------------------------------------------------
+    def task_easy(self, input_text: str) -> float:
+        """Task 1: Identify the concept from a support ticket."""
+        # Generate a dynamic task to get expected concept
+        task = self._generate_dynamic_task()
+        expected = task["expected_concept"]
+        return self._grade_identification(input_text, expected)
+
+    def task_medium(self, input_text: str) -> float:
+        """Task 2: Find the correct relation from an identified concept."""
+        task = self._generate_dynamic_task()
+        expected = task["expected_relation"]
+        return self._grade_relation(input_text, expected)
+
+    def task_hard(self, input_text: str) -> float:
+        """Task 3: Provide the resolution answer."""
+        task = self._generate_dynamic_task()
+        expected = task["expected_answer"]
+        return self._grade_answer(input_text, expected)
+
+    # -----------------------------------------------------------------
+    # OpenEnv interface (step/reset/state) – kept for the interactive episode
+    # -----------------------------------------------------------------
     def reset(self) -> str:
         self.current_task = self._generate_dynamic_task()
         self.current_step = 0
         self.episode_reward = 0.0
         self.done = False
-        # Extract concepts asynchronously (fire-and-forget)
+        # Asynchronously extract concepts (optional, non-blocking)
         try:
             loop = asyncio.get_event_loop()
             if loop.is_running():
@@ -497,7 +500,7 @@ class KnowledgeGraphEnv:
             reward = self._grade_relation(action, self.current_task["expected_relation"])
             if reward >= 0.3:
                 self.current_step = 2
-        else:  # answer
+        else:
             reward = self._grade_answer(action, self.current_task["expected_answer"])
             self.done = True
             self.current_step = 3
@@ -520,6 +523,9 @@ class KnowledgeGraphEnv:
             "step_name": ["identify", "relate", "answer"][self.current_step] if self.current_step < 3 else "done"
         }
 
+    # -----------------------------------------------------------------
+    # Dynamic task generation with difficulty levels
+    # -----------------------------------------------------------------
     def _generate_dynamic_task(self) -> dict:
         concepts = list(self.concept_memory.concepts.keys())
         if not concepts:
@@ -543,90 +549,72 @@ class KnowledgeGraphEnv:
             expected_answer = possible_answers[0]
         else:
             expected_answer = random.choice(list(self.concept_memory.concepts.keys()))
-        templates = [
-            f"I'm having trouble with {base_concept}. Can you help?",
-            f"User reports {base_concept} persists.",
-            f"Ticket: {base_concept} affecting workflow.",
-            f"Customer says {base_concept} needs urgent resolution.",
-        ]
-        input_text = random.choice(templates)
+        # Generate different input complexities based on difficulty
+        templates = {
+            "easy": [
+                f"I'm having trouble with {base_concept}.",
+                f"{base_concept} not working.",
+            ],
+            "medium": [
+                f"User reports {base_concept} persists after restart.",
+                f"Ticket: {base_concept} affecting workflow.",
+            ],
+            "hard": [
+                f"Critical: {base_concept} causing system failure, need urgent resolution.",
+                f"Customer says {base_concept} is blocking all operations.",
+            ]
+        }
+        difficulty = random.choice(["easy", "medium", "hard"])
+        input_text = random.choice(templates[difficulty])
         return {
-            "type": "dynamic",
+            "type": difficulty,
             "input": input_text,
             "expected_concept": base_concept,
             "expected_relation": expected_relation,
             "expected_answer": expected_answer
         }
 
-    def _grade_identification(self, action: str, expected_concept: str) -> float:
+    # -----------------------------------------------------------------
+    # Deterministic grading functions (0.0 / 0.3 / 0.7 / 1.0)
+    # -----------------------------------------------------------------
+    def _grade_identification(self, action: str, expected: str) -> float:
+        """Simple deterministic grading for task_easy."""
         action_lower = action.lower().strip()
-        if action_lower in self.concept_memory.concepts:
-            pred_vec = self.concept_memory.concepts[action_lower].vector
+        expected_lower = expected.lower()
+        if action_lower == expected_lower:
+            return 1.0
+        elif expected_lower in action_lower or action_lower in expected_lower:
+            return 0.7
+        elif any(word in action_lower for word in expected_lower.split()):
+            return 0.3
         else:
-            features = self.ontology.get_features(action_lower)
-            temp_vec = np.zeros(DIMS)
-            for i, f in enumerate(features[:5]):
-                if f in self.feature_registry.feature_to_id:
-                    fid = self.feature_registry.feature_to_id[f]
-                    fv = self.feature_registry.get_vector(fid)
-                    temp_vec += fv
-            if np.linalg.norm(temp_vec) > 0:
-                temp_vec /= np.linalg.norm(temp_vec)
-            else:
-                temp_vec = np.zeros(DIMS)
-                temp_vec /= np.linalg.norm(temp_vec)
-            pred_vec = temp_vec
-        expected_vec = self.concept_memory.concepts[expected_concept].vector
-        similarity = float(np.dot(pred_vec, expected_vec) / (np.linalg.norm(pred_vec) * np.linalg.norm(expected_vec) + 1e-8))
-        reward = max(0.0, min(1.0, (similarity + 1) / 2))
-        if action_lower == expected_concept:
-            reward = 1.0
-        return reward
-
-    def _grade_relation(self, action: str, expected_relation: str) -> float:
-        action_lower = action.lower().strip()
-        reward = 0.0
-        base_concept = self.current_task["expected_concept"]
-        if action_lower in self.concept_memory.relationships.get(base_concept, set()):
-            reward += 0.5
-        if expected_relation in action_lower:
-            reward += 0.5
-        acts = self.reasoning_engine.multi_hop_reasoning(base_concept, max_hops=1)
-        if action_lower in acts:
-            reward += 0.3
-        return min(1.0, reward)
-
-    def _grade_answer(self, action: str, expected_answer: str) -> float:
-        if expected_answer not in self.concept_memory.concepts:
             return 0.0
+
+    def _grade_relation(self, action: str, expected: str) -> float:
+        """Deterministic grading for task_medium."""
         action_lower = action.lower().strip()
-        if action_lower in self.concept_memory.concepts:
-            pred_vec = self.concept_memory.concepts[action_lower].vector
+        expected_lower = expected.lower()
+        if action_lower == expected_lower:
+            return 1.0
+        elif expected_lower in action_lower:
+            return 0.7
+        elif action_lower in self.concept_memory.relationships.get(self.current_task["expected_concept"] if self.current_task else "", set()):
+            return 0.5
         else:
-            features = self.ontology.get_features(action_lower)
-            temp_vec = np.zeros(DIMS)
-            for i, f in enumerate(features[:5]):
-                if f in self.feature_registry.feature_to_id:
-                    fid = self.feature_registry.feature_to_id[f]
-                    fv = self.feature_registry.get_vector(fid)
-                    temp_vec += fv
-            if np.linalg.norm(temp_vec) > 0:
-                temp_vec /= np.linalg.norm(temp_vec)
-            else:
-                temp_vec = np.zeros(DIMS)
-                temp_vec /= np.linalg.norm(temp_vec)
-            pred_vec = temp_vec
-        results = self.concept_memory.search(pred_vec, top_k=1)
-        if results:
-            best_match, sim = results[0]
-            expected_vec = self.concept_memory.concepts[expected_answer].vector
-            similarity = float(np.dot(pred_vec, expected_vec) / (np.linalg.norm(pred_vec) * np.linalg.norm(expected_vec) + 1e-8))
-            reward = max(0.0, min(1.0, (similarity + 1) / 2))
-            if best_match == expected_answer:
-                reward = 1.0
+            return 0.0
+
+    def _grade_answer(self, action: str, expected: str) -> float:
+        """Deterministic grading for task_hard."""
+        action_lower = action.lower().strip()
+        expected_lower = expected.lower()
+        if action_lower == expected_lower:
+            return 1.0
+        elif expected_lower in action_lower:
+            return 0.7
+        elif any(word in action_lower for word in expected_lower.split()):
+            return 0.3
         else:
-            reward = 0.0
-        return reward
+            return 0.0
 
     def close(self):
         self.trainer.stop()
