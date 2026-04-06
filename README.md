@@ -9,67 +9,98 @@ app_port: 7860
 
 # Self‑Evolving Knowledge Graph Environment for Continuous Reasoning
 
+> *Think of it as a system that stores knowledge like a graph, learns continuously after deployment, and answers in milliseconds.*
+
 > *Fast, memory‑efficient, and continuously learning – designed for real‑world customer support automation.*
+
+---
 
 ## 🎯 What is this?
 
-A reinforcement learning environment that simulates customer support ticket triage. An agent learns to: 1) Identify the main issue, 2) Relate it to a known concept, 3) Propose a solution.
+A **reinforcement learning environment** that simulates customer support ticket triage.  
+An agent learns to:
 
-Unlike static environments or LLMs, our system remembers everything and improves after deployment – without retraining.
+1. **Identify** the main issue from a support ticket.
+2. **Relate** it to a known concept in a dynamic knowledge graph.
+3. **Answer** with a resolution action.
 
-## 🧠 Key Innovations
+Unlike static environments or large language models (LLMs), our system **maintains persistent memory of concepts and relationships** and **improves after deployment through continuous background updates** – without retraining.
 
-- **Persistent memory** – stores concepts and relationships permanently.
-- **Continuous learning** – background trainer updates vectors every 10 seconds.
-- **DNA‑inspired encoding** – compact 16‑dim vectors, low memory (~150 MB for 1000 concepts), fast (<1 ms query).
-- **Reasoning engine** – multi‑hop graph propagation + analogical reasoning.
-- **Deterministic grading** – clear reward rules (exact match → 1.0, partial → 0.7/0.3).
+---
 
-## ⚙️ How It Works
+## 🧠 Key Innovations (Why it’s different)
 
-1. Input support ticket → extract keywords as features.
-2. Each feature maps to a letter sequence (A‑Z) with learnable vectors.
-3. Concept vector = sum of its features' encodings, normalised.
-4. Knowledge graph stores concepts and relationships; linked concepts move vectors closer.
-5. FAISS search + multi‑hop reasoning + analogical arithmetic.
-6. Deterministic scoring (0.0 / 0.3 / 0.7 / 1.0).
+| Feature | What it does | Why it matters |
+|---------|--------------|----------------|
+| **Persistent memory** | Stores concepts and relationships permanently | The agent never forgets past tickets |
+| **Continuous learning** | Background trainer updates vectors every 10 seconds | The system gets smarter over time, even after deployment |
+| **DNA‑inspired encoding** | Each concept is built from structured combinations of simple components (letters A–Z), enabling compact and composable representations. Compact 16‑dim vectors. | Very low memory (~150 MB for 1000 concepts) and fast (<1 ms query) |
+| **Reasoning engine** | Multi‑hop graph propagation + analogical reasoning | Can answer complex queries like “A is to B as C is to ?” |
+| **Deterministic grading** | Clear reward rules (exact match → 1.0, partial → 0.7/0.3) | Judges can reproduce scores 100% of the time |
+
+---
+
+## ⚙️ How It Works (simple version)
+
+1. **Input** – a support ticket (e.g., *“I can’t log in”*)
+2. **Feature extraction** – keywords become features (e.g., “login”, “password”)
+3. **DNA encoding** – each feature maps to a sequence of letters (A–Z) with learnable vectors; a concept vector is the sum of its features’ encodings. *DNA‑inspired encoding means each concept is built from structured combinations of simple components (letters A–Z), enabling compact and composable representations.*
+4. **Knowledge graph** – concepts are nodes; relationships are edges. When two concepts are linked, their vectors move closer – the whole graph learns.
+5. **Reasoning** – FAISS search (similarity) + multi‑hop activation + analogical arithmetic.
+6. **Reward** – deterministic scoring based on exact match, substring, or word overlap (0.0 / 0.3 / 0.7 / 1.0).
+
+---
 
 ## 📊 OpenEnv Tasks (3 independent graders)
 
-- **Easy (task_easy)** – identify the main concept. Example: "Login not working" → "login issue".
-- **Medium (task_medium)** – find the correct relation. Example: "Bill is wrong" → "refund".
-- **Hard (task_hard)** – provide the resolution. Example: "Locked out after failed payment" → "reset password".
+| Task | Difficulty | Description | Example input | Expected output |
+|------|------------|-------------|---------------|-----------------|
+| `task_easy` | Easy | Identify the main concept | *“Login not working”* | `login issue` |
+| `task_medium` | Medium | Find the correct relation | *“Bill is wrong”* | `refund` |
+| `task_hard` | Hard | Provide the resolution | *“Locked out after failed payment”* | `reset password` |
 
-All graders are deterministic and return a score between 0.0 and 1.0.
+All graders are **deterministic** and return a score between 0.0 and 1.0.
+
+---
 
 ## ⚡ Performance (on 2 vCPU / 8GB)
 
-- Latency per step: <1 ms
-- Full episode (3 steps): <5 ms
-- Memory for 1000 concepts: ~150 MB
-- Determinism: 100%
-- Scalability: up to 100,000 concepts with <2 ms search
+| Metric | Value |
+|--------|-------|
+| Latency per step | < 1 ms |
+| Full episode (3 steps) | < 5 ms |
+| Memory for 1,000 concepts | ~150 MB |
+| Determinism | 100% (same input → same score) |
+| Scalability | Up to 100,000 concepts with < 2 ms search |
 
-## 🔄 Comparison with LLMs (balanced)
+---
 
-- **Memory**: LLM limited context / Ours persistent graph
-- **Latency**: LLM seconds / Ours microseconds
-- **Cost**: LLM API/GPU / Ours zero (CPU only)
-- **Learning after deployment**: LLM expensive fine‑tuning / Ours automatic background updates
-- **Best for**: LLM general reasoning / Ours structured, repetitive, fast queries
+## 🔄 Comparison with LLMs (balanced view)
 
-We complement LLMs, not replace them.
+| Aspect | LLM‑based approach | Our environment |
+|--------|--------------------|-----------------|
+| **Memory** | Context window only; external DB needed | Persistent graph, built‑in |
+| **Latency** | Seconds | Microseconds |
+| **Cost** | API or GPU | Zero (CPU only) |
+| **Learning after deployment** | Expensive fine‑tuning | Automatic background updates |
+| **Best for** | General reasoning, creative generation | Structured, repetitive, fast queries |
+
+> *We do not claim to replace LLMs – we provide a complementary solution for tasks that require low latency, persistent memory, and incremental learning.*
+
+---
 
 ## 🚀 Real‑World Use Cases
 
-- Customer support ticket routing
-- Enterprise knowledge management
-- Educational tutoring systems
-- Legal case law analysis
+- **Customer support ticket routing** – learn new issues continuously.
+- **Enterprise knowledge management** – keep a living graph of documents.
+- **Educational tutoring systems** – track student misconceptions.
+- **Legal case law analysis** – link new precedents to old rulings.
+
+---
 
 ## 🛠️ How to Run
 
-Locally:
+### Locally
 ```bash
 git clone https://github.com/outstandingom/dna-modal.git
 cd dna-modal
