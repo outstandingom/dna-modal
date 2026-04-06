@@ -13,9 +13,6 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 import openai
 
-# Ensure brain_data directory exists
-os.makedirs(PERSIST_DIR, exist_ok=True)
-
 # ============================================================
 # Configuration
 # ============================================================
@@ -31,7 +28,9 @@ BATCH_SIZE = 32
 TRAIN_INTERVAL_SEC = 10
 PERSIST_DIR = "./brain_data"
 
-# LLM configuration from environment
+# Ensure brain_data directory exists
+os.makedirs(PERSIST_DIR, exist_ok=True)
+
 API_BASE_URL = os.getenv("API_BASE_URL", "https://api.openai.com/v1")
 MODEL_NAME = os.getenv("MODEL_NAME", "gpt-3.5-turbo")
 HF_TOKEN = os.getenv("HF_TOKEN", "")
@@ -40,7 +39,7 @@ openai_client = openai.OpenAI(base_url=API_BASE_URL, api_key=HF_TOKEN) if HF_TOK
 STOP_WORDS = {"the","and","for","are","but","not","you","all","can","had","her","was","one","our","out","has","have","from","they","been","said","each","which","their","will","other","about","many","then","them","these","some","would","make","like","into","time","very","when","come","could","than","its","also","back","after","two","how","what","where","who","why","this","that","with"}
 
 # ============================================================
-# Auto‑expanding Ontology with OpenAI
+# DynamicOntology (with OpenAI)
 # ============================================================
 class DynamicOntology:
     def __init__(self):
@@ -93,7 +92,7 @@ class DynamicOntology:
                 self.feature_to_concepts[f].append(concept)
 
 # ============================================================
-# Feature Registry (unchanged)
+# Feature Registry
 # ============================================================
 class FeatureRegistry:
     def __init__(self, ontology: DynamicOntology):
@@ -166,21 +165,23 @@ class LetterVectors:
             self.vec[ch] = np.array(arr, dtype=np.float32)
 
 # ============================================================
-# DNA Concept (simplified)
+# DNA Concept
 # ============================================================
 class DNAConcept:
-    def __init__(self, name: str, physical_features: List[int], semantic_features: List[int]):
+    def __init__(self, name: str, physical_features: List[int], semantic_features: List[int], feature_registry, letter_vec):
         self.name = name
         self.physical_features = physical_features
         self.semantic_features = semantic_features
+        self.feature_registry = feature_registry
+        self.letter_vec = letter_vec
         self.vector: Optional[np.ndarray] = None
         self._update_vector()
 
     def _encode_feature(self, fid: int, start_pos: int) -> np.ndarray:
-        letters = FEATURE_REGISTRY.feature_to_letters(fid, length=5)
+        letters = self.feature_registry.feature_to_letters(fid, length=5)
         vec = np.zeros(DIMS, dtype=np.float32)
         for i, ch in enumerate(letters):
-            base = LETTER_VEC.get(ch)
+            base = self.letter_vec.get(ch)
             vec += np.sin(base + (start_pos + i) * POSITION_OFFSET)
         return vec
 
@@ -205,6 +206,19 @@ class DNAConcept:
         self.vector /= (np.linalg.norm(self.vector) + 1e-8)
         other.vector /= (np.linalg.norm(other.vector) + 1e-8)
 
+        for concept in (self, other):
+            for fid in concept.physical_features + concept.semantic_features:
+                letters = self.feature_registry.feature_to_letters(fid, length=5)
+                for i, ch in enumerate(letters):
+                    base = self.letter_vec.get(ch)
+                    x = base + i * POSITION_OFFSET
+                    grad_sin = np.cos(x)
+                    norm_grad = np.linalg.norm(grad_sin) + 1e-8
+                    delta_f = lr * 0.5 * diff * grad_sin / norm_grad
+                    self.feature_registry.update_vector(fid, delta_f)
+                    delta_l = lr * 0.5 * diff * grad_sin / norm_grad
+                    self.letter_vec.update(ch, delta_l)
+
     def cosine_similarity(self, other: 'DNAConcept') -> float:
         return np.dot(self.vector, other.vector) / (np.linalg.norm(self.vector) * np.linalg.norm(other.vector) + 1e-8)
 
@@ -216,8 +230,8 @@ class DNAConcept:
             "vector": self.vector.tolist()
         }
     @classmethod
-    def from_serialized(cls, data: dict):
-        obj = cls(data["name"], data["physical_features"], data["semantic_features"])
+    def from_serialized(cls, data: dict, feature_registry, letter_vec):
+        obj = cls(data["name"], data["physical_features"], data["semantic_features"], feature_registry, letter_vec)
         obj.vector = np.array(data["vector"], dtype=np.float32)
         return obj
 
@@ -225,9 +239,8 @@ class DNAConcept:
 # Reasoning Engine
 # ============================================================
 class ReasoningEngine:
-    def __init__(self, concept_memory: 'ConceptMemory', feature_registry: FeatureRegistry):
+    def __init__(self, concept_memory: 'ConceptMemory'):
         self.concept_memory = concept_memory
-        self.feature_registry = feature_registry
 
     def multi_hop_reasoning(self, start: str, max_hops: int = 3, decay: float = 0.7) -> Dict[str, float]:
         if start not in self.concept_memory.relationships:
@@ -267,7 +280,9 @@ class ReasoningEngine:
 # Concept Memory
 # ============================================================
 class ConceptMemory:
-    def __init__(self, max_concepts=MAX_CONCEPTS):
+    def __init__(self, feature_registry, letter_vec, max_concepts=MAX_CONCEPTS):
+        self.feature_registry = feature_registry
+        self.letter_vec = letter_vec
         self.concepts: Dict[str, DNAConcept] = {}
         self.relationships: Dict[str, Set[str]] = defaultdict(set)
         self.max_concepts = max_concepts
@@ -292,7 +307,7 @@ class ConceptMemory:
         name_low = name.lower()
         if name_low in self.concepts:
             return self.concepts[name_low]
-        concept = DNAConcept(name_low, physical_features, semantic_features)
+        concept = DNAConcept(name_low, physical_features, semantic_features, self.feature_registry, self.letter_vec)
         self.concepts[name_low] = concept
         self.index.add(concept.vector.reshape(1, -1))
         self.id_to_name[self.next_id] = name_low
@@ -321,14 +336,14 @@ class ConceptMemory:
                 results.append((name, sim))
         return results
 
-    async def extract_and_link(self, text: str, sector: str = "general") -> List[str]:
+    async def extract_and_link(self, text: str, ontology: DynamicOntology, sector: str = "general") -> List[str]:
         words = [w for w in text.lower().split() if len(w) > 3 and w not in STOP_WORDS]
         unique = list(set(words))[:15]
         concept_list = []
         for kw in unique:
-            features = await ONTOLOGY.get_features_llm(kw) if ONTOLOGY.llm_enabled else ONTOLOGY.get_features(kw)
-            physical_fids = [FEATURE_REGISTRY.register(f) for f in features]
-            semantic_fids = [FEATURE_REGISTRY.register(f) for f in features]
+            features = await ontology.get_features_llm(kw) if ontology.llm_enabled else ontology.get_features(kw)
+            physical_fids = [self.feature_registry.register(f) for f in features]
+            semantic_fids = [self.feature_registry.register(f) for f in features]
             concept = self.register(kw, physical_fids, semantic_fids)
             concept_list.append(kw)
         for i in range(len(unique)):
@@ -355,13 +370,13 @@ class ConceptMemory:
         self.concepts = {}
         self.relationships = defaultdict(set)
         for name, cdata in data.get("concepts", {}).items():
-            self.concepts[name] = DNAConcept.from_serialized(cdata)
+            self.concepts[name] = DNAConcept.from_serialized(cdata, self.feature_registry, self.letter_vec)
         for k, vlist in data.get("relationships", {}).items():
             self.relationships[k] = set(vlist)
         self._rebuild_index()
 
 # ============================================================
-# Persistence
+# Persistence Manager
 # ============================================================
 class PersistenceManager:
     @staticmethod
@@ -375,14 +390,15 @@ class PersistenceManager:
             pickle.dump(letter_vec.serialize(), f)
         if concept_memory.index.ntotal > 0:
             faiss.write_index(concept_memory.index, os.path.join(PERSIST_DIR, "faiss.index"))
+
     @staticmethod
-    def load_all() -> Tuple[ConceptMemory, FeatureRegistry, LetterVectors]:
+    def load_all() -> Tuple[ConceptMemory, FeatureRegistry, LetterVectors, DynamicOntology]:
         ontology = DynamicOntology()
         feature_registry = FeatureRegistry(ontology)
         letter_vec = LetterVectors()
-        concept_memory = ConceptMemory()
+        concept_memory = ConceptMemory(feature_registry, letter_vec)
         if not os.path.exists(PERSIST_DIR):
-            return concept_memory, feature_registry, letter_vec
+            return concept_memory, feature_registry, letter_vec, ontology
         concept_file = os.path.join(PERSIST_DIR, "concept_memory.pkl")
         if os.path.exists(concept_file):
             with open(concept_file, "rb") as f:
@@ -400,25 +416,30 @@ class PersistenceManager:
             concept_memory.index = faiss.read_index(index_file)
         else:
             concept_memory._rebuild_index()
-        return concept_memory, feature_registry, letter_vec
+        return concept_memory, feature_registry, letter_vec, ontology
 
 # ============================================================
-# Background Trainer (optional)
+# Background Trainer
 # ============================================================
 class ContinuousTrainer:
-    def __init__(self, concept_memory: ConceptMemory, interval_sec: int = TRAIN_INTERVAL_SEC):
+    def __init__(self, concept_memory: ConceptMemory, feature_registry: FeatureRegistry, letter_vec: LetterVectors, interval_sec: int = TRAIN_INTERVAL_SEC):
         self.concept_memory = concept_memory
+        self.feature_registry = feature_registry
+        self.letter_vec = letter_vec
         self.interval = interval_sec
         self.running = False
         self.thread = None
+
     def start(self):
         self.running = True
         self.thread = threading.Thread(target=self._train_loop, daemon=True)
         self.thread.start()
+
     def stop(self):
         self.running = False
         if self.thread:
             self.thread.join(timeout=2)
+
     def _train_loop(self):
         while self.running:
             time.sleep(self.interval)
@@ -431,24 +452,22 @@ class ContinuousTrainer:
                     self.concept_memory.concepts[a].move_towards(self.concept_memory.concepts[b])
             self.concept_memory._rebuild_index()
             if random.random() < 0.1:
-                PersistenceManager.save_all(self.concept_memory, FEATURE_REGISTRY, LETTER_VEC)
+                PersistenceManager.save_all(self.concept_memory, self.feature_registry, self.letter_vec)
 
 # ============================================================
-# Upgraded Environment (OpenEnv compliant)
+# KnowledgeGraphEnv (Main Environment)
 # ============================================================
 class KnowledgeGraphEnv:
     def __init__(self):
-        global LETTER_VEC, FEATURE_REGISTRY, CONCEPT_MEMORY, REASONING_ENGINE, ONTOLOGY, TRAINER
-        self.concept_memory, self.feature_registry, self.letter_vec = PersistenceManager.load_all()
-        global LETTER_VEC, FEATURE_REGISTRY, CONCEPT_MEMORY, ONTOLOGY, REASONING_ENGINE
-        LETTER_VEC = self.letter_vec
-        FEATURE_REGISTRY = self.feature_registry
-        CONCEPT_MEMORY = self.concept_memory
-        ONTOLOGY = self.feature_registry.ontology
-        REASONING_ENGINE = ReasoningEngine(CONCEPT_MEMORY, FEATURE_REGISTRY)
-        self.trainer = ContinuousTrainer(CONCEPT_MEMORY)
-        self.trainer.start()
+        # Load all components
+        self.concept_memory, self.feature_registry, self.letter_vec, self.ontology = PersistenceManager.load_all()
+        self.reasoning_engine = ReasoningEngine(self.concept_memory)
+        # Seed initial concepts if empty
         self._seed_initial_concepts()
+        # Start background trainer
+        self.trainer = ContinuousTrainer(self.concept_memory, self.feature_registry, self.letter_vec)
+        self.trainer.start()
+        # Episode state
         self.current_task = None
         self.current_step = 0
         self.episode_reward = 0.0
@@ -479,12 +498,13 @@ class KnowledgeGraphEnv:
         self.current_step = 0
         self.episode_reward = 0.0
         self.done = False
+        # Extract concepts asynchronously (fire-and-forget)
         try:
             loop = asyncio.get_event_loop()
             if loop.is_running():
-                asyncio.create_task(self.concept_memory.extract_and_link(self.current_task["input"]))
+                asyncio.create_task(self.concept_memory.extract_and_link(self.current_task["input"], self.ontology))
             else:
-                loop.run_until_complete(self.concept_memory.extract_and_link(self.current_task["input"]))
+                loop.run_until_complete(self.concept_memory.extract_and_link(self.current_task["input"], self.ontology))
         except:
             pass
         return self.current_task["input"]
@@ -541,7 +561,7 @@ class KnowledgeGraphEnv:
             similar = self.concept_memory.search(vec, top_k=3)
             related = [r[0] for r in similar if r[0] != base_concept]
         expected_relation = related[0] if related else "related issue"
-        reasoning_result = REASONING_ENGINE.multi_hop_reasoning(base_concept, max_hops=2)
+        reasoning_result = self.reasoning_engine.multi_hop_reasoning(base_concept, max_hops=2)
         possible_answers = [c for c in reasoning_result.keys() if c != base_concept and c != expected_relation]
         expected_answer = possible_answers[0] if possible_answers else "contact support"
         templates = [
@@ -564,7 +584,7 @@ class KnowledgeGraphEnv:
         if action_lower in self.concept_memory.concepts:
             pred_vec = self.concept_memory.concepts[action_lower].vector
         else:
-            features = ONTOLOGY.get_features(action_lower)
+            features = self.ontology.get_features(action_lower)
             temp_vec = np.zeros(DIMS)
             for i, f in enumerate(features[:5]):
                 if f in self.feature_registry.feature_to_id:
@@ -592,17 +612,19 @@ class KnowledgeGraphEnv:
             reward += 0.5
         if expected_relation in action_lower:
             reward += 0.5
-        acts = REASONING_ENGINE.multi_hop_reasoning(base_concept, max_hops=1)
+        acts = self.reasoning_engine.multi_hop_reasoning(base_concept, max_hops=1)
         if action_lower in acts:
             reward += 0.3
         return min(1.0, reward)
 
     def _grade_answer(self, action: str, expected_answer: str) -> float:
+        if expected_answer not in self.concept_memory.concepts:
+            return 0.0
         action_lower = action.lower().strip()
         if action_lower in self.concept_memory.concepts:
             pred_vec = self.concept_memory.concepts[action_lower].vector
         else:
-            features = ONTOLOGY.get_features(action_lower)
+            features = self.ontology.get_features(action_lower)
             temp_vec = np.zeros(DIMS)
             for i, f in enumerate(features[:5]):
                 if f in self.feature_registry.feature_to_id:
@@ -632,7 +654,7 @@ class KnowledgeGraphEnv:
         PersistenceManager.save_all(self.concept_memory, self.feature_registry, self.letter_vec)
 
 # ============================================================
-# FastAPI Server for HF Space
+# FastAPI App
 # ============================================================
 app = FastAPI()
 env = KnowledgeGraphEnv()
@@ -673,11 +695,3 @@ async def state_endpoint():
 @app.on_event("shutdown")
 def shutdown_event():
     env.close()
-
-# Global references for other modules
-LETTER_VEC = None
-FEATURE_REGISTRY = None
-CONCEPT_MEMORY = None
-REASONING_ENGINE = None
-ONTOLOGY = None
-TRAINER = None
