@@ -522,9 +522,10 @@ class KnowledgeGraphEnv:
             reward = self._grade_relation(action, self.current_task["expected_relation"])
             if reward >= 0.3:
                 self.current_step = 2
-        else:
+        else:  # answer
             reward = self._grade_answer(action, self.current_task["expected_answer"])
             self.done = True
+            self.current_step = 3   # mark episode finished
         self.episode_reward += reward
         obs = self.current_task["input"] if not self.done else ""
         info = {
@@ -563,7 +564,10 @@ class KnowledgeGraphEnv:
         expected_relation = related[0] if related else "related issue"
         reasoning_result = self.reasoning_engine.multi_hop_reasoning(base_concept, max_hops=2)
         possible_answers = [c for c in reasoning_result.keys() if c != base_concept and c != expected_relation]
-        expected_answer = possible_answers[0] if possible_answers else "contact support"
+        if possible_answers:
+            expected_answer = possible_answers[0]
+        else:
+            expected_answer = random.choice(list(self.concept_memory.concepts.keys()))
         templates = [
             f"I'm having trouble with {base_concept}. Can you help?",
             f"User reports {base_concept} persists.",

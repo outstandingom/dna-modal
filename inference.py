@@ -1,5 +1,4 @@
 from knowledge_graph_env import KnowledgeGraphEnv
-import sys
 
 def main():
     env = KnowledgeGraphEnv()
@@ -8,15 +7,17 @@ def main():
     obs = env.reset()
     print(f"[STEP] Observation: {obs}")
 
-    # Episode: 3 steps
-    step = 0
     total_reward = 0.0
-    while not env.state().get("step", 0) == 3:
+    step_count = 0
+    max_steps = 3  # identify, relate, answer
+
+    for step_idx in range(max_steps):
         state = env.state()
         step_name = state["step_name"]
-        # Simple agent heuristics based on observation
+        print(f"\n--- Step {step_idx+1}: {step_name.upper()} ---")
+
+        # Simple heuristic agent
         if step_name == "identify":
-            # Extract key concept from input (crude)
             words = obs.lower().split()
             if "login" in words or "account" in words:
                 action = "login issue"
@@ -31,7 +32,6 @@ def main():
             else:
                 action = "hardware failure"
         elif step_name == "relate":
-            # Use the identified concept to guess a relation
             if "login" in obs.lower() or "account" in obs.lower():
                 action = "account locked"
             elif "billing" in obs.lower() or "payment" in obs.lower():
@@ -55,12 +55,15 @@ def main():
                 action = "replace battery"
 
         obs, reward, done, info = env.step(action)
-        print(f"[STEP] Action: {action}")
-        print(f"[STEP] Reward: {reward:.4f}")
+        print(f"Action: {action}")
+        print(f"Reward: {reward:.4f}")
         total_reward += reward
-        step += 1
+        step_count += 1
 
-    print(f"[END] Total reward: {total_reward:.4f}")
+        if done:
+            break
+
+    print(f"\n[END] Total reward: {total_reward:.4f} after {step_count} steps")
     env.close()
 
 if __name__ == "__main__":
