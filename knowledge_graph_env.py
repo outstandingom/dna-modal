@@ -397,25 +397,43 @@ class PersistenceManager:
         feature_registry = FeatureRegistry(ontology)
         letter_vec = LetterVectors()
         concept_memory = ConceptMemory(feature_registry, letter_vec)
+        
+        # If no persistence directory, return fresh components
         if not os.path.exists(PERSIST_DIR):
             return concept_memory, feature_registry, letter_vec, ontology
-        concept_file = os.path.join(PERSIST_DIR, "concept_memory.pkl")
-        if os.path.exists(concept_file):
-            with open(concept_file, "rb") as f:
-                concept_memory.restore(pickle.load(f))
-        feat_file = os.path.join(PERSIST_DIR, "feature_registry.pkl")
-        if os.path.exists(feat_file):
-            with open(feat_file, "rb") as f:
+        
+        # Try to restore each component, fallback to fresh if any error
+        try:
+            with open(os.path.join(PERSIST_DIR, "feature_registry.pkl"), "rb") as f:
                 feature_registry.restore(pickle.load(f))
-        letter_file = os.path.join(PERSIST_DIR, "letter_vec.pkl")
-        if os.path.exists(letter_file):
-            with open(letter_file, "rb") as f:
+        except Exception as e:
+            print(f"Failed to restore feature_registry: {e}. Starting fresh.")
+            feature_registry = FeatureRegistry(ontology)
+        
+        try:
+            with open(os.path.join(PERSIST_DIR, "letter_vec.pkl"), "rb") as f:
                 letter_vec.restore(pickle.load(f))
+        except Exception as e:
+            print(f"Failed to restore letter_vec: {e}. Starting fresh.")
+            letter_vec = LetterVectors()
+        
+        try:
+            with open(os.path.join(PERSIST_DIR, "concept_memory.pkl"), "rb") as f:
+                concept_memory.restore(pickle.load(f))
+        except Exception as e:
+            print(f"Failed to restore concept_memory: {e}. Starting fresh.")
+            concept_memory = ConceptMemory(feature_registry, letter_vec)
+        
+        # If index file exists but concept_memory is empty, rebuild index
         index_file = os.path.join(PERSIST_DIR, "faiss.index")
-        if os.path.exists(index_file):
-            concept_memory.index = faiss.read_index(index_file)
+        if os.path.exists(index_file) and concept_memory.index.ntotal == 0:
+            try:
+                concept_memory.index = faiss.read_index(index_file)
+            except Exception:
+                concept_memory._rebuild_index()
         else:
             concept_memory._rebuild_index()
+        
         return concept_memory, feature_registry, letter_vec, ontology
 
 # ============================================================
@@ -564,6 +582,7 @@ class KnowledgeGraphEnv:
         expected_relation = related[0] if related else "related issue"
         reasoning_result = self.reasoning_engine.multi_hop_reasoning(base_concept, max_hops=2)
         possible_answers = [c for c in reasoning_result.keys() if c != base_concept and c != expected_relation]
+        # FIX: never use "contact support" – pick an existing concept
         if possible_answers:
             expected_answer = possible_answers[0]
         else:
