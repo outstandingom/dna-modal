@@ -17,10 +17,12 @@ dependencies = [
     "httpx",
     "pydantic",
     "openai",
+    "openenv-core>=0.2.0",
 ]
 
 [project.scripts]
+server = "uvicorn knowledge_graph_env:app --host 0.0.0.0 --port 7860"
 inference = "inference:main"
 
 [tool.setuptools]
-py-modules = ["knowledge_graph_env", "inference"]
+py-modules = ["knowledge_graph_env", "inference", "app"]

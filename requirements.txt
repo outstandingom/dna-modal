@@ -4,4 +4,4 @@ fastapi
 uvicorn
 httpx
 pydantic
-openai
+openaiopenenv-core>=0.2.0
