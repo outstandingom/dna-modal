@@ -4,23 +4,13 @@ version: "1.0.0"
 tasks:
   - id: easy
     name: "Intent Identification"
-    description: "Identify the primary support category from a direct user query."
     grader: "task_easy"
-    input_example: "I can't log in to my account"
-    expected_output: "login issue"
   - id: medium
     name: "Relational Mapping"
-    description: "Map the identified intent to a related technical concept in the knowledge graph."
     grader: "task_medium"
-    input_example: "My bill is wrong"
-    expected_output: "refund"
   - id: hard
     name: "Multi-hop Resolution"
-    description: "Provide the correct resolution action based on multi-hop reasoning within the graph."
     grader: "task_hard"
-    input_example: "Locked out after failed payment and account lock"
-    expected_output: "reset password"
 metadata:
   framework: "FastAPI"
   vector_store: "FAISS"
-  embedding_dims: 16
