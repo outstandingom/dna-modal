@@ -31,9 +31,9 @@ PERSIST_DIR = "./brain_data"
 os.makedirs(PERSIST_DIR, exist_ok=True)
 
 API_BASE_URL = os.getenv("API_BASE_URL", "https://api.openai.com/v1")
+API_KEY = os.getenv("API_KEY", "")  # Use API_KEY, not HF_TOKEN
 MODEL_NAME = os.getenv("MODEL_NAME", "gpt-3.5-turbo")
-HF_TOKEN = os.getenv("HF_TOKEN", "")
-openai_client = openai.OpenAI(base_url=API_BASE_URL, api_key=HF_TOKEN) if HF_TOKEN else None
+openai_client = openai.OpenAI(base_url=API_BASE_URL, api_key=API_KEY) if API_KEY else None
 
 STOP_WORDS = {"the","and","for","are","but","not","you","all","can","had","her","was","one","our","out","has","have","from","they","been","said","each","which","their","will","other","about","many","then","them","these","some","would","make","like","into","time","very","when","come","could","than","its","also","back","after","two","how","what","where","who","why","this","that","with"}
 
