@@ -573,7 +573,7 @@ class KnowledgeGraphEnv:
             if np.linalg.norm(temp_vec) > 0:
                 temp_vec /= np.linalg.norm(temp_vec)
             else:
-                temp_vec = np.random.randn(DIMS)
+                temp_vec = np.zeros(DIMS)
                 temp_vec /= np.linalg.norm(temp_vec)
             pred_vec = temp_vec
         expected_vec = self.concept_memory.concepts[expected_concept].vector
@@ -613,7 +613,7 @@ class KnowledgeGraphEnv:
             if np.linalg.norm(temp_vec) > 0:
                 temp_vec /= np.linalg.norm(temp_vec)
             else:
-                temp_vec = np.random.randn(DIMS)
+                temp_vec = np.zeros(DIMS)
                 temp_vec /= np.linalg.norm(temp_vec)
             pred_vec = temp_vec
         results = self.concept_memory.search(pred_vec, top_k=1)
