@@ -1,4 +1,10 @@
+import os
 from knowledge_graph_env import KnowledgeGraphEnv
+
+# Required by pre-submission checklist
+API_BASE_URL = os.getenv("API_BASE_URL", "https://api.openai.com/v1")
+MODEL_NAME = os.getenv("MODEL_NAME", "gpt-3.5-turbo")
+HF_TOKEN = os.getenv("HF_TOKEN", "")   # No default key
 
 def main():
     env = KnowledgeGraphEnv()
@@ -9,7 +15,7 @@ def main():
 
     total_reward = 0.0
     step_count = 0
-    max_steps = 3  # identify, relate, answer
+    max_steps = 3
 
     for step_idx in range(max_steps):
         state = env.state()
