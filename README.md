@@ -7,4 +7,5 @@ sdk: docker
 app_file: inference.py
 pinned: false
 ---
-# dna-modal
+
+# Knowledge Graph Env
