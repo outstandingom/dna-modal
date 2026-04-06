@@ -7,10 +7,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-# Clean old persisted data on every start (fixes KeyError)
+# Force fresh start – delete any old corrupted data
 RUN rm -rf /app/brain_data
 
-# Ensure fresh brain_data directory exists
 RUN mkdir -p /app/brain_data
 
 EXPOSE 7860
