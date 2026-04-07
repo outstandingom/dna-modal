@@ -1,7 +1,7 @@
 import os
+from typing import List, Dict, Any
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-from typing import List, Dict, Any
 
 # ============================================================
 # SAFE GRADER FUNCTIONS (for Phase 2)
@@ -14,7 +14,11 @@ def task_easy(input_text: str) -> float:
     keywords = ["login", "account", "password", "access", "sign in"]
     matches = sum(1 for kw in keywords if kw in text)
     score = 0.001 + (matches / len(keywords)) * 0.998
-    return max(0.0001, min(0.9999, score))
+    if score < 0.0001:
+        score = 0.0001
+    if score > 0.9999:
+        score = 0.9999
+    return score
 
 def task_medium(input_text: str) -> float:
     if not isinstance(input_text, str) or not input_text:
@@ -23,7 +27,11 @@ def task_medium(input_text: str) -> float:
     keywords = ["bill", "payment", "charge", "invoice", "refund", "subscription"]
     matches = sum(1 for kw in keywords if kw in text)
     score = 0.001 + (matches / len(keywords)) * 0.998
-    return max(0.0001, min(0.9999, score))
+    if score < 0.0001:
+        score = 0.0001
+    if score > 0.9999:
+        score = 0.9999
+    return score
 
 def task_hard(input_text: str) -> float:
     if not isinstance(input_text, str) or not input_text:
@@ -32,9 +40,12 @@ def task_hard(input_text: str) -> float:
     keywords = ["locked", "failed", "security", "blocked", "breach", "critical"]
     matches = sum(1 for kw in keywords if kw in text)
     score = 0.001 + (matches / len(keywords)) * 0.998
-    return max(0.0001, min(0.9999, score))
+    if score < 0.0001:
+        score = 0.0001
+    if score > 0.9999:
+        score = 0.9999
+    return score
 
-# Global registry for validator discovery
 TASKS = ["task_easy", "task_medium", "task_hard"]
 GRADERS = {
     "task_easy": task_easy,
@@ -43,25 +54,26 @@ GRADERS = {
 }
 
 # ============================================================
-# Minimal Environment (for Phase 1 – dummy responses)
+# Minimal Environment (dummy, but works for OpenEnv API)
 # ============================================================
 class KnowledgeGraphEnv:
     def __init__(self, start_trainer: bool = True):
         pass
 
     def reset(self) -> str:
-        return "Dummy observation – environment ready"
+        return "Environment ready. This is a dummy observation."
 
     def step(self, action: str):
-        return "Dummy observation", 0.0, False, {}
+        # Returns: observation, reward, done, info
+        return "Dummy observation after step", 0.0, False, {}
 
     def state(self) -> dict:
-        return {"dummy": True}
+        return {"status": "dummy"}
 
     def close(self):
         pass
 
-    # Instance methods for inference.py (delegate to top‑level graders)
+    # Instance methods for inference.py
     def task_easy(self, input_text: str) -> float:
         return task_easy(input_text)
 
@@ -72,7 +84,7 @@ class KnowledgeGraphEnv:
         return task_hard(input_text)
 
 # ============================================================
-# FastAPI App (required for Space)
+# FastAPI App
 # ============================================================
 app = FastAPI()
 
