@@ -1,5 +1,4 @@
 import os
-import sys
 from knowledge_graph_env import KnowledgeGraphEnv
 
 API_BASE_URL = os.getenv("API_BASE_URL", "https://api.openai.com/v1")
@@ -14,7 +13,7 @@ def main():
     obs = env.reset()
     print(f"[STEP] Reset observation: {obs}")
     
-    # Three separate tasks with distinct inputs
+    # Three separate tasks using the grader functions
     tasks = [
         ("easy", "I can't log in to my account"),
         ("medium", "My bill is wrong, please help"),
@@ -30,8 +29,6 @@ def main():
         else:
             score = env.task_hard(input_text)
         
-        # Ensure score is clamped between 0.01 and 0.99 (safety)
-        score = max(0.01, min(0.99, score))
         print(f"[STEP] Task {task_id}: input='{input_text}', score={score:.4f}")
         total += score
     
