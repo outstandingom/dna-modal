@@ -4,16 +4,10 @@ version: "1.0.0"
 tasks:
   - id: easy
     name: "Intent Identification"
-    description: "Identify the main concept from a support ticket"
     grader: "task_easy"
-    expected_score_range: [0.01, 0.99]
   - id: medium
     name: "Relational Mapping"
-    description: "Find the correct relation for an identified concept"
     grader: "task_medium"
-    expected_score_range: [0.01, 0.99]
   - id: hard
     name: "Resolution Answer"
-    description: "Provide the correct resolution action"
     grader: "task_hard"
-    expected_score_range: [0.01, 0.99]

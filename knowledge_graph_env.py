@@ -581,7 +581,7 @@ class KnowledgeGraphEnv:
         elif any(word in action_lower for word in expected_lower.split()):
             return 0.3
         else:
-            return 0.01
+            return 0.011
 
     def _grade_relation(self, action: str, expected: str) -> float:
         action_lower = action.lower().strip()
@@ -593,7 +593,7 @@ class KnowledgeGraphEnv:
         elif self.current_task and action_lower in self.concept_memory.relationships.get(self.current_task["expected_concept"], set()):
             return 0.5
         else:
-            return 0.01
+            return 0.011
 
     def _grade_answer(self, action: str, expected: str) -> float:
         action_lower = action.lower().strip()
@@ -605,7 +605,7 @@ class KnowledgeGraphEnv:
         elif any(word in action_lower for word in expected_lower.split()):
             return 0.3
         else:
-            return 0.01
+            return 0.011
 
     def close(self):
         self.trainer.stop()
