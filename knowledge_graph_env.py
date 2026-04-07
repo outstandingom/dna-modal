@@ -45,7 +45,7 @@ def task_hard(input_text: str) -> float:
     return max(0.0001, min(0.9999, score))
 
 # ============================================================
-# Configuration
+# Configuration (keep your original config)
 # ============================================================
 DIMS = 16
 ALPHABET = [chr(ord('A') + i) for i in range(26)]
@@ -77,7 +77,7 @@ MODEL_NAME = os.getenv("MODEL_NAME", "gpt-3.5-turbo")
 STOP_WORDS = {"the","and","for","are","but","not","you","all","can","had","her","was","one","our","out","has","have","from","they","been","said","each","which","their","will","other","about","many","then","them","these","some","would","make","like","into","time","very","when","come","could","than","its","also","back","after","two","how","what","where","who","why","this","that","with"}
 
 # ============================================================
-# DynamicOntology
+# DynamicOntology (keep your original class)
 # ============================================================
 class DynamicOntology:
     def __init__(self):
@@ -130,7 +130,7 @@ class DynamicOntology:
                 self.feature_to_concepts[f].append(concept)
 
 # ============================================================
-# Feature Registry
+# Feature Registry (keep your original class)
 # ============================================================
 class FeatureRegistry:
     def __init__(self, ontology: DynamicOntology):
@@ -188,7 +188,7 @@ class FeatureRegistry:
         self.ontology.restore(data["ontology"])
 
 # ============================================================
-# Letter Vectors
+# Letter Vectors (keep your original class)
 # ============================================================
 class LetterVectors:
     def __init__(self):
@@ -203,7 +203,7 @@ class LetterVectors:
             self.vec[ch] = np.array(arr, dtype=np.float32)
 
 # ============================================================
-# DNA Concept
+# DNA Concept (keep your original class)
 # ============================================================
 class DNAConcept:
     def __init__(self, name: str, physical_features: List[int], semantic_features: List[int], feature_registry, letter_vec):
@@ -274,7 +274,7 @@ class DNAConcept:
         return obj
 
 # ============================================================
-# Reasoning Engine
+# Reasoning Engine (keep your original class)
 # ============================================================
 class ReasoningEngine:
     def __init__(self, concept_memory: 'ConceptMemory'):
@@ -315,7 +315,7 @@ class ReasoningEngine:
         return [r[0] for r in results if r[0] not in (a, b, c)]
 
 # ============================================================
-# Concept Memory
+# Concept Memory (keep your original class)
 # ============================================================
 class ConceptMemory:
     def __init__(self, feature_registry, letter_vec, max_concepts=MAX_CONCEPTS):
@@ -414,7 +414,7 @@ class ConceptMemory:
         self._rebuild_index()
 
 # ============================================================
-# Persistence Manager
+# Persistence Manager (keep your original class)
 # ============================================================
 class PersistenceManager:
     @staticmethod
@@ -430,7 +430,7 @@ class PersistenceManager:
         return concept_memory, feature_registry, letter_vec, ontology
 
 # ============================================================
-# Background Trainer
+# Background Trainer (keep your original class)
 # ============================================================
 class ContinuousTrainer:
     def __init__(self, concept_memory: ConceptMemory, feature_registry: FeatureRegistry, letter_vec: LetterVectors, interval_sec: int = TRAIN_INTERVAL_SEC):
