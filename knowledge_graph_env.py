@@ -140,7 +140,7 @@ class DynamicOntology:
                 self.feature_to_concepts[f].append(concept)
 
 # ============================================================
-# Feature Registry (unchanged)
+# Feature Registry
 # ============================================================
 class FeatureRegistry:
     def __init__(self, ontology: DynamicOntology):
@@ -198,7 +198,7 @@ class FeatureRegistry:
         self.ontology.restore(data["ontology"])
 
 # ============================================================
-# Letter Vectors (unchanged)
+# Letter Vectors
 # ============================================================
 class LetterVectors:
     def __init__(self):
@@ -213,7 +213,7 @@ class LetterVectors:
             self.vec[ch] = np.array(arr, dtype=np.float32)
 
 # ============================================================
-# DNA Concept (unchanged)
+# DNA Concept
 # ============================================================
 class DNAConcept:
     def __init__(self, name: str, physical_features: List[int], semantic_features: List[int], feature_registry, letter_vec):
@@ -284,7 +284,7 @@ class DNAConcept:
         return obj
 
 # ============================================================
-# Reasoning Engine (unchanged)
+# Reasoning Engine
 # ============================================================
 class ReasoningEngine:
     def __init__(self, concept_memory: 'ConceptMemory'):
@@ -325,7 +325,7 @@ class ReasoningEngine:
         return [r[0] for r in results if r[0] not in (a, b, c)]
 
 # ============================================================
-# Concept Memory (unchanged)
+# Concept Memory
 # ============================================================
 class ConceptMemory:
     def __init__(self, feature_registry, letter_vec, max_concepts=MAX_CONCEPTS):
@@ -424,7 +424,7 @@ class ConceptMemory:
         self._rebuild_index()
 
 # ============================================================
-# Persistence Manager (unchanged)
+# Persistence Manager
 # ============================================================
 class PersistenceManager:
     @staticmethod
@@ -440,7 +440,7 @@ class PersistenceManager:
         return concept_memory, feature_registry, letter_vec, ontology
 
 # ============================================================
-# Background Trainer (unchanged)
+# Background Trainer
 # ============================================================
 class ContinuousTrainer:
     def __init__(self, concept_memory: ConceptMemory, feature_registry: FeatureRegistry, letter_vec: LetterVectors, interval_sec: int = TRAIN_INTERVAL_SEC):
@@ -651,19 +651,26 @@ class KnowledgeGraphEnv:
             self.trainer.stop()
 
 # ============================================================
-# FastAPI App – ADDED /tasks AND /grade ENDPOINTS
+# FastAPI App – ALL MODELS AND ENDPOINTS
 # ============================================================
 app = FastAPI()
 
-_api_env = None
+# ----- Pydantic models for all endpoints -----
+class ResetResponse(BaseModel):
+    observation: str
 
-def _get_api_env():
-    global _api_env
-    if _api_env is None:
-        _api_env = KnowledgeGraphEnv(start_trainer=True)
-    return _api_env
+class StepRequest(BaseModel):
+    action: str
 
-# ----- Pydantic models for the new endpoints -----
+class StepResponse(BaseModel):
+    observation: str
+    reward: float
+    done: bool
+    info: dict
+
+class StateResponse(BaseModel):
+    state: dict
+
 class TaskResponse(BaseModel):
     tasks: List[str]
 
@@ -673,6 +680,15 @@ class GradeRequest(BaseModel):
 
 class GradeResponse(BaseModel):
     score: float
+
+# ----- Lazy environment getter -----
+_api_env = None
+
+def _get_api_env():
+    global _api_env
+    if _api_env is None:
+        _api_env = KnowledgeGraphEnv(start_trainer=True)
+    return _api_env
 
 # ----- Existing endpoints -----
 @app.get("/ping")
@@ -693,7 +709,7 @@ async def step_endpoint(req: StepRequest):
 async def state_endpoint():
     return StateResponse(state=_get_api_env().state())
 
-# ----- NEW ENDPOINTS FOR VALIDATOR -----
+# ----- NEW ENDPOINTS FOR VALIDATOR DISCOVERY -----
 @app.get("/tasks", response_model=TaskResponse)
 async def tasks_endpoint():
     """Expose the list of available tasks."""
