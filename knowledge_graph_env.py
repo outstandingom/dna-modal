@@ -14,7 +14,7 @@ from pydantic import BaseModel
 import openai
 
 # ============================================================
-# SAFE GRADER FUNCTIONS – STRICTLY BETWEEN 0 AND 1
+# SAFE GRADER FUNCTIONS – MUST BE FIRST
 # ============================================================
 
 def task_easy(input_text: str) -> float:
@@ -45,7 +45,7 @@ def task_hard(input_text: str) -> float:
     return max(0.0001, min(0.9999, score))
 
 # ============================================================
-# Configuration (keep your original config)
+# Configuration
 # ============================================================
 DIMS = 16
 ALPHABET = [chr(ord('A') + i) for i in range(26)]
@@ -61,7 +61,6 @@ PERSIST_DIR = "./brain_data"
 
 os.makedirs(PERSIST_DIR, exist_ok=True)
 
-# Use validator's proxy if available, otherwise fallback to OpenAI
 USE_VALIDATOR_PROXY = os.environ.get("API_BASE_URL") is not None
 if USE_VALIDATOR_PROXY:
     API_BASE_URL = os.environ["API_BASE_URL"]
@@ -77,7 +76,7 @@ MODEL_NAME = os.getenv("MODEL_NAME", "gpt-3.5-turbo")
 STOP_WORDS = {"the","and","for","are","but","not","you","all","can","had","her","was","one","our","out","has","have","from","they","been","said","each","which","their","will","other","about","many","then","them","these","some","would","make","like","into","time","very","when","come","could","than","its","also","back","after","two","how","what","where","who","why","this","that","with"}
 
 # ============================================================
-# DynamicOntology (keep your original class)
+# DynamicOntology
 # ============================================================
 class DynamicOntology:
     def __init__(self):
@@ -130,7 +129,7 @@ class DynamicOntology:
                 self.feature_to_concepts[f].append(concept)
 
 # ============================================================
-# Feature Registry (keep your original class)
+# Feature Registry
 # ============================================================
 class FeatureRegistry:
     def __init__(self, ontology: DynamicOntology):
@@ -188,7 +187,7 @@ class FeatureRegistry:
         self.ontology.restore(data["ontology"])
 
 # ============================================================
-# Letter Vectors (keep your original class)
+# Letter Vectors
 # ============================================================
 class LetterVectors:
     def __init__(self):
@@ -203,7 +202,7 @@ class LetterVectors:
             self.vec[ch] = np.array(arr, dtype=np.float32)
 
 # ============================================================
-# DNA Concept (keep your original class)
+# DNA Concept
 # ============================================================
 class DNAConcept:
     def __init__(self, name: str, physical_features: List[int], semantic_features: List[int], feature_registry, letter_vec):
@@ -274,7 +273,7 @@ class DNAConcept:
         return obj
 
 # ============================================================
-# Reasoning Engine (keep your original class)
+# Reasoning Engine
 # ============================================================
 class ReasoningEngine:
     def __init__(self, concept_memory: 'ConceptMemory'):
@@ -315,7 +314,7 @@ class ReasoningEngine:
         return [r[0] for r in results if r[0] not in (a, b, c)]
 
 # ============================================================
-# Concept Memory (keep your original class)
+# Concept Memory
 # ============================================================
 class ConceptMemory:
     def __init__(self, feature_registry, letter_vec, max_concepts=MAX_CONCEPTS):
@@ -414,7 +413,7 @@ class ConceptMemory:
         self._rebuild_index()
 
 # ============================================================
-# Persistence Manager (keep your original class)
+# Persistence Manager
 # ============================================================
 class PersistenceManager:
     @staticmethod
@@ -430,7 +429,7 @@ class PersistenceManager:
         return concept_memory, feature_registry, letter_vec, ontology
 
 # ============================================================
-# Background Trainer (keep your original class)
+# Background Trainer
 # ============================================================
 class ContinuousTrainer:
     def __init__(self, concept_memory: ConceptMemory, feature_registry: FeatureRegistry, letter_vec: LetterVectors, interval_sec: int = TRAIN_INTERVAL_SEC):
@@ -500,7 +499,7 @@ class KnowledgeGraphEnv:
         self.concept_memory.add_relationship("slow performance", "crash")
         self.concept_memory.add_relationship("feature request", "enhancement")
 
-    # ========== INSTANCE METHODS FOR inference.py ==========
+    # Instance methods for inference.py (delegate to top‑level graders)
     def task_easy(self, input_text: str) -> float:
         return task_easy(input_text)
 
@@ -509,7 +508,6 @@ class KnowledgeGraphEnv:
 
     def task_hard(self, input_text: str) -> float:
         return task_hard(input_text)
-    # =======================================================
 
     # OpenEnv interface
     def reset(self) -> str:
@@ -642,7 +640,7 @@ class KnowledgeGraphEnv:
             self.trainer.stop()
 
 # ============================================================
-# FastAPI App (lazy environment)
+# FastAPI App
 # ============================================================
 app = FastAPI()
 
