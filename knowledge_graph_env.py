@@ -7,14 +7,9 @@ import pickle
 import random
 from collections import defaultdict
 from typing import Dict, List, Tuple, Optional, Set, Any
-import numpy as np
-import faiss
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
-import openai
 
 # ============================================================
-# SAFE GRADER FUNCTIONS – MUST BE FIRST
+# SAFE GRADER FUNCTIONS – MUST BE FIRST, NO HEAVY IMPORTS
 # ============================================================
 
 def task_easy(input_text: str) -> float:
@@ -56,7 +51,7 @@ GRADERS = {
 }
 
 # ============================================================
-# Configuration
+# Configuration (no heavy imports here)
 # ============================================================
 DIMS = 16
 ALPHABET = [chr(ord('A') + i) for i in range(26)]
@@ -72,34 +67,42 @@ PERSIST_DIR = "./brain_data"
 
 os.makedirs(PERSIST_DIR, exist_ok=True)
 
+# These will be lazy‑loaded inside the classes that need them
+# We only set environment variables now
 USE_VALIDATOR_PROXY = os.environ.get("API_BASE_URL") is not None
 if USE_VALIDATOR_PROXY:
     API_BASE_URL = os.environ["API_BASE_URL"]
     API_KEY = os.environ["API_KEY"]
-    openai_client = openai.OpenAI(base_url=API_BASE_URL, api_key=API_KEY)
 else:
     API_BASE_URL = "https://api.openai.com/v1"
     API_KEY = os.getenv("HF_TOKEN", "")
-    openai_client = openai.OpenAI(base_url=API_BASE_URL, api_key=API_KEY) if API_KEY else None
 
 MODEL_NAME = os.getenv("MODEL_NAME", "gpt-3.5-turbo")
 
 STOP_WORDS = {"the","and","for","are","but","not","you","all","can","had","her","was","one","our","out","has","have","from","they","been","said","each","which","their","will","other","about","many","then","them","these","some","would","make","like","into","time","very","when","come","could","than","its","also","back","after","two","how","what","where","who","why","this","that","with"}
 
 # ============================================================
-# DynamicOntology (unchanged)
+# DynamicOntology (lazy OpenAI client)
 # ============================================================
 class DynamicOntology:
     def __init__(self):
         self.concept_to_features: Dict[str, List[str]] = {}
         self.feature_to_concepts: Dict[str, List[str]] = defaultdict(list)
         self.llm_enabled = True
+        self._openai_client = None
+
+    def _get_openai_client(self):
+        if self._openai_client is None:
+            import openai
+            self._openai_client = openai.OpenAI(base_url=API_BASE_URL, api_key=API_KEY)
+        return self._openai_client
 
     async def get_features_llm(self, concept: str) -> List[str]:
-        if not openai_client:
+        if not API_KEY:
             return [concept]
         try:
-            response = openai_client.chat.completions.create(
+            client = self._get_openai_client()
+            response = client.chat.completions.create(
                 model=MODEL_NAME,
                 messages=[
                     {"role": "system", "content": "You are a helpful assistant that extracts physical and semantic features of concepts. Return a comma-separated list of up to 5 features."},
@@ -140,7 +143,7 @@ class DynamicOntology:
                 self.feature_to_concepts[f].append(concept)
 
 # ============================================================
-# Feature Registry
+# Feature Registry (lazy numpy)
 # ============================================================
 class FeatureRegistry:
     def __init__(self, ontology: DynamicOntology):
@@ -163,6 +166,8 @@ class FeatureRegistry:
         self.next_id += 1
         self.feature_to_id[name] = fid
         self.id_to_feature[fid] = name
+        # lazy numpy import inside method
+        import numpy as np
         self.feature_vectors[fid] = np.random.uniform(-1, 1, DIMS).astype(np.float32)
         return fid
 
@@ -170,10 +175,12 @@ class FeatureRegistry:
         return self.feature_vectors[fid]
 
     def update_vector(self, fid: int, delta: np.ndarray):
+        import numpy as np
         delta = np.clip(delta, -GRAD_CLIP, GRAD_CLIP)
         self.feature_vectors[fid] += delta
 
     def feature_to_letters(self, fid: int, length: int = 5) -> List[str]:
+        import numpy as np
         vec = self.feature_vectors[fid]
         probs = np.exp(vec[:length])
         probs /= np.sum(probs)
@@ -191,6 +198,7 @@ class FeatureRegistry:
         }
 
     def restore(self, data: dict):
+        import numpy as np
         self.feature_to_id = data["feature_to_id"]
         self.id_to_feature = {int(k): v for k, v in data["id_to_feature"].items()}
         self.feature_vectors = {int(k): np.array(v, dtype=np.float32) for k, v in data["feature_vectors"].items()}
@@ -198,22 +206,27 @@ class FeatureRegistry:
         self.ontology.restore(data["ontology"])
 
 # ============================================================
-# Letter Vectors
+# Letter Vectors (lazy numpy)
 # ============================================================
 class LetterVectors:
     def __init__(self):
+        import numpy as np
         self.vec = {ch: np.random.uniform(-1, 1, DIMS).astype(np.float32) for ch in ALPHABET}
-    def get(self, letter: str) -> np.ndarray: return self.vec[letter]
+    def get(self, letter: str) -> np.ndarray:
+        return self.vec[letter]
     def update(self, letter: str, delta: np.ndarray):
+        import numpy as np
         delta = np.clip(delta, -GRAD_CLIP, GRAD_CLIP)
         self.vec[letter] += delta
-    def serialize(self) -> dict: return {ch: self.vec[ch].tolist() for ch in ALPHABET}
+    def serialize(self) -> dict:
+        return {ch: self.vec[ch].tolist() for ch in ALPHABET}
     def restore(self, data: dict):
+        import numpy as np
         for ch, arr in data.items():
             self.vec[ch] = np.array(arr, dtype=np.float32)
 
 # ============================================================
-# DNA Concept
+# DNA Concept (lazy numpy)
 # ============================================================
 class DNAConcept:
     def __init__(self, name: str, physical_features: List[int], semantic_features: List[int], feature_registry, letter_vec):
@@ -226,6 +239,7 @@ class DNAConcept:
         self._update_vector()
 
     def _encode_feature(self, fid: int, start_pos: int) -> np.ndarray:
+        import numpy as np
         letters = self.feature_registry.feature_to_letters(fid, length=5)
         vec = np.zeros(DIMS, dtype=np.float32)
         for i, ch in enumerate(letters):
@@ -234,6 +248,7 @@ class DNAConcept:
         return vec
 
     def _update_vector(self):
+        import numpy as np
         vec = np.zeros(DIMS, dtype=np.float32)
         pos = 0
         for fid in self.physical_features:
@@ -248,6 +263,7 @@ class DNAConcept:
         self.vector = vec
 
     def move_towards(self, other: 'DNAConcept', lr: float = LR_CONCEPT):
+        import numpy as np
         diff = other.vector - self.vector
         self.vector += lr * diff
         other.vector -= lr * diff
@@ -268,6 +284,7 @@ class DNAConcept:
                     self.letter_vec.update(ch, delta_l)
 
     def cosine_similarity(self, other: 'DNAConcept') -> float:
+        import numpy as np
         return np.dot(self.vector, other.vector) / (np.linalg.norm(self.vector) * np.linalg.norm(other.vector) + 1e-8)
 
     def serialize(self) -> dict:
@@ -279,12 +296,13 @@ class DNAConcept:
         }
     @classmethod
     def from_serialized(cls, data: dict, feature_registry, letter_vec):
+        import numpy as np
         obj = cls(data["name"], data["physical_features"], data["semantic_features"], feature_registry, letter_vec)
         obj.vector = np.array(data["vector"], dtype=np.float32)
         return obj
 
 # ============================================================
-# Reasoning Engine
+# Reasoning Engine (no changes, uses numpy from concept)
 # ============================================================
 class ReasoningEngine:
     def __init__(self, concept_memory: 'ConceptMemory'):
@@ -325,7 +343,7 @@ class ReasoningEngine:
         return [r[0] for r in results if r[0] not in (a, b, c)]
 
 # ============================================================
-# Concept Memory
+# Concept Memory (lazy faiss)
 # ============================================================
 class ConceptMemory:
     def __init__(self, feature_registry, letter_vec, max_concepts=MAX_CONCEPTS):
@@ -334,14 +352,21 @@ class ConceptMemory:
         self.concepts: Dict[str, DNAConcept] = {}
         self.relationships: Dict[str, Set[str]] = defaultdict(set)
         self.max_concepts = max_concepts
-        self.index = faiss.IndexFlatIP(DIMS)
+        self.index = None  # lazy faiss
         self.id_to_name: Dict[int, str] = {}
         self.name_to_id: Dict[str, int] = {}
         self.next_id = 0
 
+    def _ensure_index(self):
+        if self.index is None:
+            import faiss
+            self.index = faiss.IndexFlatIP(DIMS)
+
     def _rebuild_index(self):
         if not self.concepts:
             return
+        import numpy as np
+        import faiss
         vectors = [c.vector for c in self.concepts.values()]
         names = list(self.concepts.keys())
         vecs = np.vstack(vectors).astype(np.float32)
@@ -357,6 +382,7 @@ class ConceptMemory:
             return self.concepts[name_low]
         concept = DNAConcept(name_low, physical_features, semantic_features, self.feature_registry, self.letter_vec)
         self.concepts[name_low] = concept
+        self._ensure_index()
         self.index.add(concept.vector.reshape(1, -1))
         self.id_to_name[self.next_id] = name_low
         self.name_to_id[name_low] = self.next_id
@@ -372,6 +398,9 @@ class ConceptMemory:
             self.concepts[a_low].move_towards(self.concepts[b_low])
 
     def search(self, query_vector: np.ndarray, top_k: int = 5) -> List[Tuple[str, float]]:
+        if not self.concepts:
+            return []
+        self._ensure_index()
         if self.index.ntotal == 0:
             return []
         q = query_vector.reshape(1, -1).astype(np.float32)
@@ -424,7 +453,7 @@ class ConceptMemory:
         self._rebuild_index()
 
 # ============================================================
-# Persistence Manager
+# Persistence Manager (unchanged)
 # ============================================================
 class PersistenceManager:
     @staticmethod
@@ -440,7 +469,7 @@ class PersistenceManager:
         return concept_memory, feature_registry, letter_vec, ontology
 
 # ============================================================
-# Background Trainer
+# Background Trainer (unchanged)
 # ============================================================
 class ContinuousTrainer:
     def __init__(self, concept_memory: ConceptMemory, feature_registry: FeatureRegistry, letter_vec: LetterVectors, interval_sec: int = TRAIN_INTERVAL_SEC):
@@ -474,7 +503,7 @@ class ContinuousTrainer:
             self.concept_memory._rebuild_index()
 
 # ============================================================
-# KnowledgeGraphEnv (Main Environment)
+# KnowledgeGraphEnv (Main Environment) – unchanged except instance methods
 # ============================================================
 class KnowledgeGraphEnv:
     def __init__(self, start_trainer: bool = True):
@@ -510,7 +539,7 @@ class KnowledgeGraphEnv:
         self.concept_memory.add_relationship("slow performance", "crash")
         self.concept_memory.add_relationship("feature request", "enhancement")
 
-    # Instance methods for inference.py (delegate to top‑level graders)
+    # Instance methods for inference.py – delegate to top‑level graders
     def task_easy(self, input_text: str) -> float:
         return task_easy(input_text)
 
@@ -651,8 +680,11 @@ class KnowledgeGraphEnv:
             self.trainer.stop()
 
 # ============================================================
-# FastAPI App – ALL MODELS AND ENDPOINTS
+# FastAPI App – ALL MODELS AND ENDPOINTS (lazy environment)
 # ============================================================
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
+
 app = FastAPI()
 
 # ----- Pydantic models for all endpoints -----
