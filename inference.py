@@ -8,7 +8,7 @@ API_KEY = os.getenv("API_KEY", os.getenv("HF_TOKEN", ""))
 MODEL_NAME = os.getenv("MODEL_NAME", "gpt-3.5-turbo")
 
 def main():
-    # ----- REQUIRED: Make at least one LLM call through the proxy -----
+    # Required LLM proxy call
     try:
         client = openai.OpenAI(base_url=API_BASE_URL, api_key=API_KEY)
         client.chat.completions.create(
@@ -18,7 +18,6 @@ def main():
         )
     except Exception as e:
         print(f"Warning: LLM proxy call failed: {e}", file=sys.stderr)
-    # ------------------------------------------------------------------
 
     tasks = [
         ("easy", "I can't log in to my account"),
