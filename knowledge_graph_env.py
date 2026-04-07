@@ -45,6 +45,17 @@ def task_hard(input_text: str) -> float:
     return max(0.0001, min(0.9999, score))
 
 # ============================================================
+# GLOBAL REGISTRY – FOR VALIDATOR DISCOVERY
+# ============================================================
+
+TASKS = ["task_easy", "task_medium", "task_hard"]
+GRADERS = {
+    "task_easy": task_easy,
+    "task_medium": task_medium,
+    "task_hard": task_hard
+}
+
+# ============================================================
 # Configuration
 # ============================================================
 DIMS = 16
@@ -76,7 +87,7 @@ MODEL_NAME = os.getenv("MODEL_NAME", "gpt-3.5-turbo")
 STOP_WORDS = {"the","and","for","are","but","not","you","all","can","had","her","was","one","our","out","has","have","from","they","been","said","each","which","their","will","other","about","many","then","them","these","some","would","make","like","into","time","very","when","come","could","than","its","also","back","after","two","how","what","where","who","why","this","that","with"}
 
 # ============================================================
-# DynamicOntology
+# DynamicOntology (unchanged)
 # ============================================================
 class DynamicOntology:
     def __init__(self):
@@ -129,7 +140,7 @@ class DynamicOntology:
                 self.feature_to_concepts[f].append(concept)
 
 # ============================================================
-# Feature Registry
+# Feature Registry (unchanged)
 # ============================================================
 class FeatureRegistry:
     def __init__(self, ontology: DynamicOntology):
@@ -187,7 +198,7 @@ class FeatureRegistry:
         self.ontology.restore(data["ontology"])
 
 # ============================================================
-# Letter Vectors
+# Letter Vectors (unchanged)
 # ============================================================
 class LetterVectors:
     def __init__(self):
@@ -202,7 +213,7 @@ class LetterVectors:
             self.vec[ch] = np.array(arr, dtype=np.float32)
 
 # ============================================================
-# DNA Concept
+# DNA Concept (unchanged)
 # ============================================================
 class DNAConcept:
     def __init__(self, name: str, physical_features: List[int], semantic_features: List[int], feature_registry, letter_vec):
@@ -273,7 +284,7 @@ class DNAConcept:
         return obj
 
 # ============================================================
-# Reasoning Engine
+# Reasoning Engine (unchanged)
 # ============================================================
 class ReasoningEngine:
     def __init__(self, concept_memory: 'ConceptMemory'):
@@ -314,7 +325,7 @@ class ReasoningEngine:
         return [r[0] for r in results if r[0] not in (a, b, c)]
 
 # ============================================================
-# Concept Memory
+# Concept Memory (unchanged)
 # ============================================================
 class ConceptMemory:
     def __init__(self, feature_registry, letter_vec, max_concepts=MAX_CONCEPTS):
@@ -413,7 +424,7 @@ class ConceptMemory:
         self._rebuild_index()
 
 # ============================================================
-# Persistence Manager
+# Persistence Manager (unchanged)
 # ============================================================
 class PersistenceManager:
     @staticmethod
@@ -429,7 +440,7 @@ class PersistenceManager:
         return concept_memory, feature_registry, letter_vec, ontology
 
 # ============================================================
-# Background Trainer
+# Background Trainer (unchanged)
 # ============================================================
 class ContinuousTrainer:
     def __init__(self, concept_memory: ConceptMemory, feature_registry: FeatureRegistry, letter_vec: LetterVectors, interval_sec: int = TRAIN_INTERVAL_SEC):
@@ -640,7 +651,7 @@ class KnowledgeGraphEnv:
             self.trainer.stop()
 
 # ============================================================
-# FastAPI App
+# FastAPI App – ADDED /tasks AND /grade ENDPOINTS
 # ============================================================
 app = FastAPI()
 
@@ -652,21 +663,18 @@ def _get_api_env():
         _api_env = KnowledgeGraphEnv(start_trainer=True)
     return _api_env
 
-class ResetResponse(BaseModel):
-    observation: str
+# ----- Pydantic models for the new endpoints -----
+class TaskResponse(BaseModel):
+    tasks: List[str]
 
-class StepRequest(BaseModel):
-    action: str
+class GradeRequest(BaseModel):
+    task_id: str
+    input_text: str
 
-class StepResponse(BaseModel):
-    observation: str
-    reward: float
-    done: bool
-    info: dict
+class GradeResponse(BaseModel):
+    score: float
 
-class StateResponse(BaseModel):
-    state: dict
-
+# ----- Existing endpoints -----
 @app.get("/ping")
 async def ping():
     return {"status": "ok"}
@@ -685,6 +693,21 @@ async def step_endpoint(req: StepRequest):
 async def state_endpoint():
     return StateResponse(state=_get_api_env().state())
 
+# ----- NEW ENDPOINTS FOR VALIDATOR -----
+@app.get("/tasks", response_model=TaskResponse)
+async def tasks_endpoint():
+    """Expose the list of available tasks."""
+    return TaskResponse(tasks=TASKS)
+
+@app.post("/grade", response_model=GradeResponse)
+async def grade_endpoint(req: GradeRequest):
+    """Route a task input to the corresponding grader."""
+    if req.task_id not in GRADERS:
+        raise HTTPException(status_code=404, detail="Task not found")
+    score = GRADERS[req.task_id](req.input_text)
+    return GradeResponse(score=score)
+
+# ----- Shutdown handler -----
 @app.on_event("shutdown")
 def shutdown_event():
     if _api_env is not None:
