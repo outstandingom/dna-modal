@@ -14,8 +14,9 @@ from pydantic import BaseModel
 import openai
 
 # ============================================================
-# SAFE GRADER FUNCTIONS FOR VALIDATOR (Phase 2)
-# These are independent, always return scores strictly in (0,1)
+# SAFE GRADER FUNCTIONS – PURE PYTHON, NO NUMPY DEPENDENCY
+# These are the only functions the validator needs.
+# They always return a score strictly between 0 and 1.
 # ============================================================
 
 def task_easy(input_text: str) -> float:
@@ -26,7 +27,12 @@ def task_easy(input_text: str) -> float:
     expected_keywords = ["login", "account", "password", "access", "sign in"]
     matches = sum(1 for kw in expected_keywords if kw in text)
     score = 0.1 + (matches / len(expected_keywords)) * 0.7
-    return float(np.clip(score, 0.01, 0.99))
+    # Manual clamp to avoid any boundary issues
+    if score < 0.01:
+        score = 0.01
+    if score > 0.99:
+        score = 0.99
+    return score
 
 def task_medium(input_text: str) -> float:
     """Grader for medium tasks (billing/payment issues)."""
@@ -36,7 +42,11 @@ def task_medium(input_text: str) -> float:
     expected_keywords = ["bill", "payment", "charge", "invoice", "refund", "subscription"]
     matches = sum(1 for kw in expected_keywords if kw in text)
     score = 0.1 + (matches / len(expected_keywords)) * 0.7
-    return float(np.clip(score, 0.01, 0.99))
+    if score < 0.01:
+        score = 0.01
+    if score > 0.99:
+        score = 0.99
+    return score
 
 def task_hard(input_text: str) -> float:
     """Grader for hard tasks (security lockouts/critical failures)."""
@@ -46,10 +56,14 @@ def task_hard(input_text: str) -> float:
     expected_keywords = ["locked", "failed", "security", "blocked", "breach", "critical"]
     matches = sum(1 for kw in expected_keywords if kw in text)
     score = 0.1 + (matches / len(expected_keywords)) * 0.7
-    return float(np.clip(score, 0.01, 0.99))
+    if score < 0.01:
+        score = 0.01
+    if score > 0.99:
+        score = 0.99
+    return score
 
 # ============================================================
-# Configuration
+# Configuration (unchanged from your original)
 # ============================================================
 DIMS = 16
 ALPHABET = [chr(ord('A') + i) for i in range(26)]
@@ -504,9 +518,8 @@ class KnowledgeGraphEnv:
         self.concept_memory.add_relationship("slow performance", "crash")
         self.concept_memory.add_relationship("feature request", "enhancement")
 
-    # ========== INSTANCE METHODS FOR inference.py ==========
+    # Instance methods for inference.py – delegate to top‑level graders
     def task_easy(self, input_text: str) -> float:
-        """Delegate to the top‑level safe grader."""
         return task_easy(input_text)
 
     def task_medium(self, input_text: str) -> float:
@@ -514,7 +527,6 @@ class KnowledgeGraphEnv:
 
     def task_hard(self, input_text: str) -> float:
         return task_hard(input_text)
-    # =======================================================
 
     # OpenEnv interface
     def reset(self) -> str:
