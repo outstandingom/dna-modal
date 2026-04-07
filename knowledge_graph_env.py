@@ -504,9 +504,9 @@ class KnowledgeGraphEnv:
         self.concept_memory.add_relationship("slow performance", "crash")
         self.concept_memory.add_relationship("feature request", "enhancement")
 
-    # ========== Graders for inference.py (instance methods) ==========
+    # ========== INSTANCE METHODS FOR inference.py ==========
     def task_easy(self, input_text: str) -> float:
-        """Instance method that delegates to the safe top-level grader."""
+        """Delegate to the top‑level safe grader."""
         return task_easy(input_text)
 
     def task_medium(self, input_text: str) -> float:
@@ -514,7 +514,7 @@ class KnowledgeGraphEnv:
 
     def task_hard(self, input_text: str) -> float:
         return task_hard(input_text)
-    # ================================================================
+    # =======================================================
 
     # OpenEnv interface
     def reset(self) -> str:
