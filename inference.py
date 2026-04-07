@@ -2,8 +2,8 @@ import os
 from knowledge_graph_env import KnowledgeGraphEnv
 
 # Required by validator – use their injected variables
-API_BASE_URL = os.environ["API_BASE_URL"]
-API_KEY = os.environ["API_KEY"]
+API_BASE_URL = os.getenv("API_BASE_URL", "https://api.openai.com/v1")
+API_KEY = os.getenv("API_KEY", os.getenv("HF_TOKEN", ""))
 
 def main():
     env = KnowledgeGraphEnv()
