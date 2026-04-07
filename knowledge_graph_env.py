@@ -467,21 +467,26 @@ class KnowledgeGraphEnv:
         self.concept_memory.add_relationship("slow performance", "crash")
         self.concept_memory.add_relationship("feature request", "enhancement")
 
+    # Task methods for the validator
     def task_easy(self, input_text: str) -> float:
         task = self._generate_dynamic_task()
         expected = task["expected_concept"]
-        return self._grade_identification(input_text, expected)
+        score = self._grade_identification(input_text, expected)
+        return max(0.01, min(0.99, score))   # clamp
 
     def task_medium(self, input_text: str) -> float:
         task = self._generate_dynamic_task()
         expected = task["expected_relation"]
-        return self._grade_relation(input_text, expected)
+        score = self._grade_relation(input_text, expected)
+        return max(0.01, min(0.99, score))
 
     def task_hard(self, input_text: str) -> float:
         task = self._generate_dynamic_task()
         expected = task["expected_answer"]
-        return self._grade_answer(input_text, expected)
+        score = self._grade_answer(input_text, expected)
+        return max(0.01, min(0.99, score))
 
+    # OpenEnv interface
     def reset(self) -> str:
         self.current_task = self._generate_dynamic_task()
         self.current_step = 0
@@ -581,7 +586,7 @@ class KnowledgeGraphEnv:
         elif any(word in action_lower for word in expected_lower.split()):
             return 0.3
         else:
-            return 0.01111
+            return 0.01
 
     def _grade_relation(self, action: str, expected: str) -> float:
         action_lower = action.lower().strip()
@@ -593,7 +598,7 @@ class KnowledgeGraphEnv:
         elif self.current_task and action_lower in self.concept_memory.relationships.get(self.current_task["expected_concept"], set()):
             return 0.5
         else:
-            return 0.01111
+            return 0.01
 
     def _grade_answer(self, action: str, expected: str) -> float:
         action_lower = action.lower().strip()
@@ -605,7 +610,7 @@ class KnowledgeGraphEnv:
         elif any(word in action_lower for word in expected_lower.split()):
             return 0.3
         else:
-            return 0.01111
+            return 0.01
 
     def close(self):
         self.trainer.stop()
@@ -652,3 +657,23 @@ async def state_endpoint():
 @app.on_event("shutdown")
 def shutdown_event():
     env.close()
+
+# ============================================================
+# Top-level grader functions for validator (important!)
+# ============================================================
+_grader_env = None
+
+def _get_grader_env():
+    global _grader_env
+    if _grader_env is None:
+        _grader_env = KnowledgeGraphEnv()
+    return _grader_env
+
+def task_easy(input_text: str) -> float:
+    return _get_grader_env().task_easy(input_text)
+
+def task_medium(input_text: str) -> float:
+    return _get_grader_env().task_medium(input_text)
+
+def task_hard(input_text: str) -> float:
+    return _get_grader_env().task_hard(input_text)
