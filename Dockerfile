@@ -1,4 +1,8 @@
-FROM python:3.10-slim
+# Use a Microsoft-hosted Python image to avoid Docker Hub rate limits
+FROM mcr.microsoft.com/azure-functions/python:4-python3.10
+
+# Or fallback to Docker Hub with retry (but above is more reliable)
+# FROM python:3.10-slim
 
 WORKDIR /app
 
@@ -6,11 +10,6 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
-
-# Delete any previously persisted data (safety)
-RUN rm -rf /app/brain_data
-
-RUN mkdir -p /app/brain_data
 
 EXPOSE 7860
 
