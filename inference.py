@@ -11,14 +11,12 @@ def main():
     # ----- REQUIRED: Make at least one LLM call through the proxy -----
     try:
         client = openai.OpenAI(base_url=API_BASE_URL, api_key=API_KEY)
-        # Minimal call – any small completion works
         client.chat.completions.create(
             model=MODEL_NAME,
             messages=[{"role": "user", "content": "Hello"}],
             max_tokens=5
         )
     except Exception as e:
-        # If the proxy is down, we still continue – but this will fail the proxy check
         print(f"Warning: LLM proxy call failed: {e}", file=sys.stderr)
     # ------------------------------------------------------------------
 
