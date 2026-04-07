@@ -475,10 +475,9 @@ class KnowledgeGraphEnv:
             task = self._generate_dynamic_task()
             expected = task["expected_concept"]
             score = self._grade_identification(input_text, expected)
-            # Clamp strictly between 0 and 1 (not 0.0, not 1.0)
-            return max(0.01, min(0.99, score))
+            # Already safe, but clamp to be extra sure
+            return max(0.05, min(0.95, score))
         except Exception:
-            # On any error, return a safe default
             return 0.5
 
     def task_medium(self, input_text: str) -> float:
@@ -486,7 +485,7 @@ class KnowledgeGraphEnv:
             task = self._generate_dynamic_task()
             expected = task["expected_relation"]
             score = self._grade_relation(input_text, expected)
-            return max(0.01, min(0.99, score))
+            return max(0.05, min(0.95, score))
         except Exception:
             return 0.5
 
@@ -495,7 +494,7 @@ class KnowledgeGraphEnv:
             task = self._generate_dynamic_task()
             expected = task["expected_answer"]
             score = self._grade_answer(input_text, expected)
-            return max(0.01, min(0.99, score))
+            return max(0.05, min(0.95, score))
         except Exception:
             return 0.5
 
@@ -589,41 +588,42 @@ class KnowledgeGraphEnv:
             "expected_answer": expected_answer
         }
 
+    # UPDATED GRADING METHODS WITH SAFE VALUES (0.05 to 0.95)
     def _grade_identification(self, action: str, expected: str) -> float:
         action_lower = action.lower().strip()
         expected_lower = expected.lower()
         if action_lower == expected_lower:
-            return 0.99
+            return 0.95
         elif expected_lower in action_lower or action_lower in expected_lower:
-            return 0.7
+            return 0.75
         elif any(word in action_lower for word in expected_lower.split()):
-            return 0.3
+            return 0.35
         else:
-            return 0.01
+            return 0.05
 
     def _grade_relation(self, action: str, expected: str) -> float:
         action_lower = action.lower().strip()
         expected_lower = expected.lower()
         if action_lower == expected_lower:
-            return 0.99
+            return 0.95
         elif expected_lower in action_lower:
-            return 0.7
+            return 0.75
         elif self.current_task and action_lower in self.concept_memory.relationships.get(self.current_task["expected_concept"], set()):
-            return 0.5
+            return 0.55
         else:
-            return 0.01
+            return 0.05
 
     def _grade_answer(self, action: str, expected: str) -> float:
         action_lower = action.lower().strip()
         expected_lower = expected.lower()
         if action_lower == expected_lower:
-            return 0.99
+            return 0.95
         elif expected_lower in action_lower:
-            return 0.7
+            return 0.75
         elif any(word in action_lower for word in expected_lower.split()):
-            return 0.3
+            return 0.35
         else:
-            return 0.01
+            return 0.05
 
     def close(self):
         if self.trainer:
@@ -680,7 +680,7 @@ _grader_env = None
 def _get_grader_env():
     global _grader_env
     if _grader_env is None:
-        # Do NOT start the background trainer for the grader environment
+        # Do NOT start background trainer for the grader environment
         _grader_env = KnowledgeGraphEnv(start_trainer=False)
     return _grader_env
 
