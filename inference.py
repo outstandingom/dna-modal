@@ -1,7 +1,6 @@
 import os
 from knowledge_graph_env import KnowledgeGraphEnv
 
-# Required by validator – use their injected variables if present
 API_BASE_URL = os.getenv("API_BASE_URL", "https://api.openai.com/v1")
 API_KEY = os.getenv("API_KEY", os.getenv("HF_TOKEN", ""))
 MODEL_NAME = os.getenv("MODEL_NAME", "gpt-3.5-turbo")
@@ -10,7 +9,6 @@ def main():
     env = KnowledgeGraphEnv()
     print("[START]")
     
-    # Test inputs for the three tasks
     test_inputs = {
         "easy": "I can't log in to my account",
         "medium": "My bill is wrong, please help",
