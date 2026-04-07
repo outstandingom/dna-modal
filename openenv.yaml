@@ -1,17 +1,19 @@
 name: knowledge_graph_env
-description: Customer support ticket triage for a SaaS company. The agent must (1) classify the issue type, (2) identify the correct internal KB article relation, and (3) suggest a resolution. Used to train automated support agents.
+description: Customer support ticket triage with self‑evolving knowledge graph.
 version: "1.0.0"
 tasks:
   - id: easy
     name: "Intent Identification"
+    description: "Identify the main concept from a support ticket"
     grader: "task_easy"
+    expected_score_range: [0.01, 0.99]
   - id: medium
     name: "Relational Mapping"
+    description: "Find the correct relation for an identified concept"
     grader: "task_medium"
+    expected_score_range: [0.01, 0.99]
   - id: hard
-    name: "Multi-hop Resolution"
+    name: "Resolution Answer"
+    description: "Provide the correct resolution action"
     grader: "task_hard"
-metadata:
-  framework: "FastAPI"
-  vector_store: "FAISS"
-  embedding_dims: 16
+    expected_score_range: [0.01, 0.99]
