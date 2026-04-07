@@ -15,44 +15,41 @@ import openai
 
 # ============================================================
 # SAFE GRADER FUNCTIONS FOR VALIDATOR (Phase 2)
-# These are independent, always return scores in (0,1)
+# These are independent, always return scores strictly in (0,1)
 # ============================================================
 
 def task_easy(input_text: str) -> float:
-    """
-    Grader for easy tasks (login issues).
-    Score strictly between 0 and 1 based on keyword matching.
-    """
+    """Grader for easy tasks (login/access issues)."""
+    if not isinstance(input_text, str) or not input_text:
+        return 0.05
     text = input_text.lower().strip()
     expected_keywords = ["login", "account", "password", "access", "sign in"]
     matches = sum(1 for kw in expected_keywords if kw in text)
-    # Map matches to (0,1): 0 matches -> 0.1, 5 matches -> 0.9
-    score = 0.1 + (matches / len(expected_keywords)) * 0.8
-    # Ensure no boundary values due to floating point
-    return max(0.01, min(0.99, score))
+    score = 0.1 + (matches / len(expected_keywords)) * 0.7
+    return float(np.clip(score, 0.01, 0.99))
 
 def task_medium(input_text: str) -> float:
-    """
-    Grader for medium tasks (billing issues).
-    """
+    """Grader for medium tasks (billing/payment issues)."""
+    if not isinstance(input_text, str) or not input_text:
+        return 0.05
     text = input_text.lower().strip()
-    expected_keywords = ["bill", "payment", "charge", "invoice", "refund", "wrong"]
+    expected_keywords = ["bill", "payment", "charge", "invoice", "refund", "subscription"]
     matches = sum(1 for kw in expected_keywords if kw in text)
-    score = 0.1 + (matches / len(expected_keywords)) * 0.8
-    return max(0.01, min(0.99, score))
+    score = 0.1 + (matches / len(expected_keywords)) * 0.7
+    return float(np.clip(score, 0.01, 0.99))
 
 def task_hard(input_text: str) -> float:
-    """
-    Grader for hard tasks (account lockout after payment failure).
-    """
+    """Grader for hard tasks (security lockouts/critical failures)."""
+    if not isinstance(input_text, str) or not input_text:
+        return 0.05
     text = input_text.lower().strip()
-    expected_keywords = ["locked", "failed payment", "account", "security", "blocked", "payment"]
+    expected_keywords = ["locked", "failed", "security", "blocked", "breach", "critical"]
     matches = sum(1 for kw in expected_keywords if kw in text)
-    score = 0.1 + (matches / len(expected_keywords)) * 0.8
-    return max(0.01, min(0.99, score))
+    score = 0.1 + (matches / len(expected_keywords)) * 0.7
+    return float(np.clip(score, 0.01, 0.99))
 
 # ============================================================
-# Configuration (unchanged)
+# Configuration
 # ============================================================
 DIMS = 16
 ALPHABET = [chr(ord('A') + i) for i in range(26)]
@@ -471,9 +468,9 @@ class ContinuousTrainer:
             self.concept_memory._rebuild_index()
 
 # ============================================================
-# KnowledgeGraphEnv (Main Environment - unchanged except name)
+# KnowledgeGraphEnv (Main Environment)
 # ============================================================
-class KnowledgeGraphEnvOriginal:
+class KnowledgeGraphEnv:
     def __init__(self, start_trainer: bool = True):
         self.concept_memory, self.feature_registry, self.letter_vec, self.ontology = PersistenceManager.load_all()
         self.reasoning_engine = ReasoningEngine(self.concept_memory)
@@ -506,34 +503,6 @@ class KnowledgeGraphEnvOriginal:
         self.concept_memory.add_relationship("billing", "refund")
         self.concept_memory.add_relationship("slow performance", "crash")
         self.concept_memory.add_relationship("feature request", "enhancement")
-
-    # Task methods for the validator (kept for compatibility, but not used by Phase 2)
-    def task_easy(self, input_text: str) -> float:
-        try:
-            task = self._generate_dynamic_task()
-            expected = task["expected_concept"]
-            score = self._grade_identification(input_text, expected)
-            return max(0.05, min(0.95, score))
-        except Exception:
-            return 0.5
-
-    def task_medium(self, input_text: str) -> float:
-        try:
-            task = self._generate_dynamic_task()
-            expected = task["expected_relation"]
-            score = self._grade_relation(input_text, expected)
-            return max(0.05, min(0.95, score))
-        except Exception:
-            return 0.5
-
-    def task_hard(self, input_text: str) -> float:
-        try:
-            task = self._generate_dynamic_task()
-            expected = task["expected_answer"]
-            score = self._grade_answer(input_text, expected)
-            return max(0.05, min(0.95, score))
-        except Exception:
-            return 0.5
 
     # OpenEnv interface
     def reset(self) -> str:
@@ -666,7 +635,7 @@ class KnowledgeGraphEnvOriginal:
             self.trainer.stop()
 
 # ============================================================
-# FastAPI App (lazy environment – no side effects on import)
+# FastAPI App (lazy environment)
 # ============================================================
 app = FastAPI()
 
@@ -675,7 +644,7 @@ _api_env = None
 def _get_api_env():
     global _api_env
     if _api_env is None:
-        _api_env = KnowledgeGraphEnvOriginal(start_trainer=True)
+        _api_env = KnowledgeGraphEnv(start_trainer=True)
     return _api_env
 
 class ResetResponse(BaseModel):
