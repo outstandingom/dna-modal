@@ -475,7 +475,6 @@ class KnowledgeGraphEnv:
             task = self._generate_dynamic_task()
             expected = task["expected_concept"]
             score = self._grade_identification(input_text, expected)
-            # Already safe, but clamp to be extra sure
             return max(0.05, min(0.95, score))
         except Exception:
             return 0.5
@@ -588,7 +587,7 @@ class KnowledgeGraphEnv:
             "expected_answer": expected_answer
         }
 
-    # UPDATED GRADING METHODS WITH SAFE VALUES (0.05 to 0.95)
+    # SAFE GRADING METHODS – strictly between 0 and 1
     def _grade_identification(self, action: str, expected: str) -> float:
         action_lower = action.lower().strip()
         expected_lower = expected.lower()
@@ -630,10 +629,37 @@ class KnowledgeGraphEnv:
             self.trainer.stop()
 
 # ============================================================
-# FastAPI App
+# Top-level grader functions for validator (important!)
+# ============================================================
+_grader_env = None
+
+def _get_grader_env():
+    global _grader_env
+    if _grader_env is None:
+        _grader_env = KnowledgeGraphEnv(start_trainer=False)
+    return _grader_env
+
+def task_easy(input_text: str) -> float:
+    return _get_grader_env().task_easy(input_text)
+
+def task_medium(input_text: str) -> float:
+    return _get_grader_env().task_medium(input_text)
+
+def task_hard(input_text: str) -> float:
+    return _get_grader_env().task_hard(input_text)
+
+# ============================================================
+# FastAPI App (lazy environment – no side effects on import)
 # ============================================================
 app = FastAPI()
-env = KnowledgeGraphEnv()
+
+_api_env = None
+
+def _get_api_env():
+    global _api_env
+    if _api_env is None:
+        _api_env = KnowledgeGraphEnv(start_trainer=True)
+    return _api_env
 
 class ResetResponse(BaseModel):
     observation: str
@@ -656,39 +682,19 @@ async def ping():
 
 @app.post("/reset", response_model=ResetResponse)
 async def reset_endpoint():
-    obs = env.reset()
+    obs = _get_api_env().reset()
     return ResetResponse(observation=obs)
 
 @app.post("/step", response_model=StepResponse)
 async def step_endpoint(req: StepRequest):
-    obs, reward, done, info = env.step(req.action)
+    obs, reward, done, info = _get_api_env().step(req.action)
     return StepResponse(observation=obs, reward=reward, done=done, info=info)
 
 @app.get("/state", response_model=StateResponse)
 async def state_endpoint():
-    return StateResponse(state=env.state())
+    return StateResponse(state=_get_api_env().state())
 
 @app.on_event("shutdown")
 def shutdown_event():
-    env.close()
-
-# ============================================================
-# Top-level grader functions for validator (important!)
-# ============================================================
-_grader_env = None
-
-def _get_grader_env():
-    global _grader_env
-    if _grader_env is None:
-        # Do NOT start background trainer for the grader environment
-        _grader_env = KnowledgeGraphEnv(start_trainer=False)
-    return _grader_env
-
-def task_easy(input_text: str) -> float:
-    return _get_grader_env().task_easy(input_text)
-
-def task_medium(input_text: str) -> float:
-    return _get_grader_env().task_medium(input_text)
-
-def task_hard(input_text: str) -> float:
-    return _get_grader_env().task_hard(input_text)
+    if _api_env is not None:
+        _api_env.close()
