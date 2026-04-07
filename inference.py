@@ -1,4 +1,5 @@
 import os
+import sys
 from knowledge_graph_env import KnowledgeGraphEnv
 
 API_BASE_URL = os.getenv("API_BASE_URL", "https://api.openai.com/v1")
@@ -9,19 +10,19 @@ def main():
     env = KnowledgeGraphEnv()
     print("[START]")
     
-    # Force an LLM call through the proxy (required by validator)
+    # Force an LLM call (for the proxy check)
     obs = env.reset()
     print(f"[STEP] Reset observation: {obs}")
     
-    # Test inputs for the three tasks
-    test_inputs = {
-        "easy": "I can't log in to my account",
-        "medium": "My bill is wrong, please help",
-        "hard": "Locked out after failed payment attempts"
-    }
+    # Three separate tasks with distinct inputs
+    tasks = [
+        ("easy", "I can't log in to my account"),
+        ("medium", "My bill is wrong, please help"),
+        ("hard", "Locked out after failed payment attempts")
+    ]
     
-    total_score = 0.0
-    for task_id, input_text in test_inputs.items():
+    total = 0.0
+    for task_id, input_text in tasks:
         if task_id == "easy":
             score = env.task_easy(input_text)
         elif task_id == "medium":
@@ -29,10 +30,12 @@ def main():
         else:
             score = env.task_hard(input_text)
         
+        # Ensure score is clamped between 0.01 and 0.99 (safety)
+        score = max(0.01, min(0.99, score))
         print(f"[STEP] Task {task_id}: input='{input_text}', score={score:.4f}")
-        total_score += score
+        total += score
     
-    print(f"[END] Total score over 3 tasks: {total_score:.4f} / 3.00")
+    print(f"[END] Total score over 3 tasks: {total:.4f} / 3.00")
     env.close()
 
 if __name__ == "__main__":
