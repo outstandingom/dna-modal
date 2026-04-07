@@ -1,7 +1,7 @@
 import os
 import sys
 import openai
-from knowledge_graph_env import task_easy, task_medium, task_hard
+from graders import task_easy, task_medium, task_hard
 
 API_BASE_URL = os.getenv("API_BASE_URL", "https://api.openai.com/v1")
 API_KEY = os.getenv("API_KEY", os.getenv("HF_TOKEN", ""))
