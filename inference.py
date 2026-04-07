@@ -9,6 +9,11 @@ def main():
     env = KnowledgeGraphEnv()
     print("[START]")
     
+    # Force an LLM call through the proxy (required by validator)
+    obs = env.reset()
+    print(f"[STEP] Reset observation: {obs}")
+    
+    # Test inputs for the three tasks
     test_inputs = {
         "easy": "I can't log in to my account",
         "medium": "My bill is wrong, please help",
