@@ -14,56 +14,41 @@ from pydantic import BaseModel
 import openai
 
 # ============================================================
-# SAFE GRADER FUNCTIONS – PURE PYTHON, NO NUMPY DEPENDENCY
-# These are the only functions the validator needs.
-# They always return a score strictly between 0 and 1.
+# SAFE GRADER FUNCTIONS – STRICTLY BETWEEN 0 AND 1
 # ============================================================
 
 def task_easy(input_text: str) -> float:
     """Grader for easy tasks (login/access issues)."""
     if not isinstance(input_text, str) or not input_text:
-        return 0.05
+        return 0.00001 + random.random() * 0.00001
     text = input_text.lower().strip()
     expected_keywords = ["login", "account", "password", "access", "sign in"]
     matches = sum(1 for kw in expected_keywords if kw in text)
-    score = 0.1 + (matches / len(expected_keywords)) * 0.7
-    # Manual clamp to avoid any boundary issues
-    if score < 0.01:
-        score = 0.01
-    if score > 0.99:
-        score = 0.99
-    return score
+    score = 0.00001 + (matches / len(expected_keywords)) * 0.99998
+    return max(0.00001, min(0.99999, score))
 
 def task_medium(input_text: str) -> float:
     """Grader for medium tasks (billing/payment issues)."""
     if not isinstance(input_text, str) or not input_text:
-        return 0.05
+        return 0.00001 + random.random() * 0.00001
     text = input_text.lower().strip()
     expected_keywords = ["bill", "payment", "charge", "invoice", "refund", "subscription"]
     matches = sum(1 for kw in expected_keywords if kw in text)
-    score = 0.1 + (matches / len(expected_keywords)) * 0.7
-    if score < 0.01:
-        score = 0.01
-    if score > 0.99:
-        score = 0.99
-    return score
+    score = 0.00001 + (matches / len(expected_keywords)) * 0.99998
+    return max(0.00001, min(0.99999, score))
 
 def task_hard(input_text: str) -> float:
     """Grader for hard tasks (security lockouts/critical failures)."""
     if not isinstance(input_text, str) or not input_text:
-        return 0.05
+        return 0.00001 + random.random() * 0.00001
     text = input_text.lower().strip()
     expected_keywords = ["locked", "failed", "security", "blocked", "breach", "critical"]
     matches = sum(1 for kw in expected_keywords if kw in text)
-    score = 0.1 + (matches / len(expected_keywords)) * 0.7
-    if score < 0.01:
-        score = 0.01
-    if score > 0.99:
-        score = 0.99
-    return score
+    score = 0.00001 + (matches / len(expected_keywords)) * 0.99998
+    return max(0.00001, min(0.99999, score))
 
 # ============================================================
-# Configuration (unchanged from your original)
+# Configuration
 # ============================================================
 DIMS = 16
 ALPHABET = [chr(ord('A') + i) for i in range(26)]
