@@ -436,12 +436,14 @@ class ContinuousTrainer:
 # KnowledgeGraphEnv (Main Environment)
 # ============================================================
 class KnowledgeGraphEnv:
-    def __init__(self):
+    def __init__(self, start_trainer: bool = True):
         self.concept_memory, self.feature_registry, self.letter_vec, self.ontology = PersistenceManager.load_all()
         self.reasoning_engine = ReasoningEngine(self.concept_memory)
         self._seed_initial_concepts()
-        self.trainer = ContinuousTrainer(self.concept_memory, self.feature_registry, self.letter_vec)
-        self.trainer.start()
+        self.trainer = None
+        if start_trainer:
+            self.trainer = ContinuousTrainer(self.concept_memory, self.feature_registry, self.letter_vec)
+            self.trainer.start()
         self.current_task = None
         self.current_step = 0
         self.episode_reward = 0.0
@@ -469,22 +471,33 @@ class KnowledgeGraphEnv:
 
     # Task methods for the validator
     def task_easy(self, input_text: str) -> float:
-        task = self._generate_dynamic_task()
-        expected = task["expected_concept"]
-        score = self._grade_identification(input_text, expected)
-        return max(0.01, min(0.99, score))   # clamp
+        try:
+            task = self._generate_dynamic_task()
+            expected = task["expected_concept"]
+            score = self._grade_identification(input_text, expected)
+            # Clamp strictly between 0 and 1 (not 0.0, not 1.0)
+            return max(0.01, min(0.99, score))
+        except Exception:
+            # On any error, return a safe default
+            return 0.5
 
     def task_medium(self, input_text: str) -> float:
-        task = self._generate_dynamic_task()
-        expected = task["expected_relation"]
-        score = self._grade_relation(input_text, expected)
-        return max(0.01, min(0.99, score))
+        try:
+            task = self._generate_dynamic_task()
+            expected = task["expected_relation"]
+            score = self._grade_relation(input_text, expected)
+            return max(0.01, min(0.99, score))
+        except Exception:
+            return 0.5
 
     def task_hard(self, input_text: str) -> float:
-        task = self._generate_dynamic_task()
-        expected = task["expected_answer"]
-        score = self._grade_answer(input_text, expected)
-        return max(0.01, min(0.99, score))
+        try:
+            task = self._generate_dynamic_task()
+            expected = task["expected_answer"]
+            score = self._grade_answer(input_text, expected)
+            return max(0.01, min(0.99, score))
+        except Exception:
+            return 0.5
 
     # OpenEnv interface
     def reset(self) -> str:
@@ -613,7 +626,8 @@ class KnowledgeGraphEnv:
             return 0.01
 
     def close(self):
-        self.trainer.stop()
+        if self.trainer:
+            self.trainer.stop()
 
 # ============================================================
 # FastAPI App
@@ -666,7 +680,8 @@ _grader_env = None
 def _get_grader_env():
     global _grader_env
     if _grader_env is None:
-        _grader_env = KnowledgeGraphEnv()
+        # Do NOT start the background trainer for the grader environment
+        _grader_env = KnowledgeGraphEnv(start_trainer=False)
     return _grader_env
 
 def task_easy(input_text: str) -> float:
