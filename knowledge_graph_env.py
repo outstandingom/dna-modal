@@ -18,34 +18,31 @@ import openai
 # ============================================================
 
 def task_easy(input_text: str) -> float:
-    """Grader for easy tasks (login/access issues)."""
     if not isinstance(input_text, str) or not input_text:
-        return 0.00001 + random.random() * 0.00001
+        return 0.0012345
     text = input_text.lower().strip()
-    expected_keywords = ["login", "account", "password", "access", "sign in"]
-    matches = sum(1 for kw in expected_keywords if kw in text)
-    score = 0.00001 + (matches / len(expected_keywords)) * 0.99998
-    return max(0.00001, min(0.99999, score))
+    keywords = ["login", "account", "password", "access", "sign in"]
+    matches = sum(1 for kw in keywords if kw in text)
+    score = 0.001 + (matches / len(keywords)) * 0.998
+    return max(0.0001, min(0.9999, score))
 
 def task_medium(input_text: str) -> float:
-    """Grader for medium tasks (billing/payment issues)."""
     if not isinstance(input_text, str) or not input_text:
-        return 0.00001 + random.random() * 0.00001
+        return 0.0023456
     text = input_text.lower().strip()
-    expected_keywords = ["bill", "payment", "charge", "invoice", "refund", "subscription"]
-    matches = sum(1 for kw in expected_keywords if kw in text)
-    score = 0.00001 + (matches / len(expected_keywords)) * 0.99998
-    return max(0.00001, min(0.99999, score))
+    keywords = ["bill", "payment", "charge", "invoice", "refund", "subscription"]
+    matches = sum(1 for kw in keywords if kw in text)
+    score = 0.001 + (matches / len(keywords)) * 0.998
+    return max(0.0001, min(0.9999, score))
 
 def task_hard(input_text: str) -> float:
-    """Grader for hard tasks (security lockouts/critical failures)."""
     if not isinstance(input_text, str) or not input_text:
-        return 0.00001 + random.random() * 0.00001
+        return 0.0034567
     text = input_text.lower().strip()
-    expected_keywords = ["locked", "failed", "security", "blocked", "breach", "critical"]
-    matches = sum(1 for kw in expected_keywords if kw in text)
-    score = 0.00001 + (matches / len(expected_keywords)) * 0.99998
-    return max(0.00001, min(0.99999, score))
+    keywords = ["locked", "failed", "security", "blocked", "breach", "critical"]
+    matches = sum(1 for kw in keywords if kw in text)
+    score = 0.001 + (matches / len(keywords)) * 0.998
+    return max(0.0001, min(0.9999, score))
 
 # ============================================================
 # Configuration
@@ -503,7 +500,7 @@ class KnowledgeGraphEnv:
         self.concept_memory.add_relationship("slow performance", "crash")
         self.concept_memory.add_relationship("feature request", "enhancement")
 
-    # Instance methods for inference.py – delegate to top‑level graders
+    # ========== INSTANCE METHODS FOR inference.py ==========
     def task_easy(self, input_text: str) -> float:
         return task_easy(input_text)
 
@@ -512,6 +509,7 @@ class KnowledgeGraphEnv:
 
     def task_hard(self, input_text: str) -> float:
         return task_hard(input_text)
+    # =======================================================
 
     # OpenEnv interface
     def reset(self) -> str:
