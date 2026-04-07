@@ -575,37 +575,37 @@ class KnowledgeGraphEnv:
         action_lower = action.lower().strip()
         expected_lower = expected.lower()
         if action_lower == expected_lower:
-            return 1.0
+            return 0.99
         elif expected_lower in action_lower or action_lower in expected_lower:
             return 0.7
         elif any(word in action_lower for word in expected_lower.split()):
             return 0.3
         else:
-            return 0.0
+            return 0.01
 
     def _grade_relation(self, action: str, expected: str) -> float:
         action_lower = action.lower().strip()
         expected_lower = expected.lower()
         if action_lower == expected_lower:
-            return 1.0
+            return 0.99
         elif expected_lower in action_lower:
             return 0.7
         elif self.current_task and action_lower in self.concept_memory.relationships.get(self.current_task["expected_concept"], set()):
             return 0.5
         else:
-            return 0.0
+            return 0.01
 
     def _grade_answer(self, action: str, expected: str) -> float:
         action_lower = action.lower().strip()
         expected_lower = expected.lower()
         if action_lower == expected_lower:
-            return 1.0
+            return 0.99
         elif expected_lower in action_lower:
             return 0.7
         elif any(word in action_lower for word in expected_lower.split()):
             return 0.3
         else:
-            return 0.0
+            return 0.01
 
     def close(self):
         self.trainer.stop()
