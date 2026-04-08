@@ -8,7 +8,6 @@ API_KEY = os.getenv("API_KEY", os.getenv("HF_TOKEN", ""))
 MODEL_NAME = os.getenv("MODEL_NAME", "gpt-3.5-turbo")
 
 def main():
-    # Required LLM proxy call
     try:
         client = openai.OpenAI(base_url=API_BASE_URL, api_key=API_KEY)
         client.chat.completions.create(
