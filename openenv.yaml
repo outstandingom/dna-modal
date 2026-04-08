@@ -4,10 +4,10 @@ version: "1.0.0"
 tasks:
   - id: easy
     name: "Intent Identification"
-    grader: "task_easy"
+    grader: "graders:task_easy"
   - id: medium
     name: "Relational Mapping"
-    grader: "task_medium"
+    grader: "graders:task_medium"
   - id: hard
     name: "Resolution Answer"
-    grader: "task_hard"
+    grader: "graders:task_hard"
