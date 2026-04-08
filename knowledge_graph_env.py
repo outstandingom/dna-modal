@@ -1,4 +1,5 @@
 import os
+from contextlib import asynccontextmanager
 from typing import List
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
@@ -22,8 +23,6 @@ class KnowledgeGraphEnv:
     def task_hard(self, input_text: str) -> float:
         return task_hard(input_text)
 
-app = FastAPI()
-
 class ResetResponse(BaseModel):
     observation: str
 class StepRequest(BaseModel):
@@ -43,11 +42,24 @@ class GradeRequest(BaseModel):
 class GradeResponse(BaseModel):
     score: float
 
-_env = KnowledgeGraphEnv()
+_env = None
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    global _env
+    _env = KnowledgeGraphEnv()
+    yield
+    _env.close()
+
+app = FastAPI(lifespan=lifespan)
 
 @app.get("/ping")
 async def ping():
     return {"status": "ok"}
+
+@app.get("/health")
+async def health():
+    return {"status": "healthy"}
 
 @app.post("/reset", response_model=ResetResponse)
 async def reset_endpoint():
@@ -70,10 +82,6 @@ async def tasks_endpoint():
 @app.post("/grade", response_model=GradeResponse)
 async def grade_endpoint(req: GradeRequest):
     if req.task_id not in GRADERS:
-        raise HTTPException(status_code=404, detail="Task not found")
+        raise HTTPException(status_code=404, detail=f"Task '{req.task_id}' not found. Available: {list(GRADERS.keys())}")
     score = GRADERS[req.task_id](req.input_text)
     return GradeResponse(score=score)
-
-@app.on_event("shutdown")
-def shutdown_event():
-    _env.close()
