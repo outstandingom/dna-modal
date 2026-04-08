@@ -1,9 +1,7 @@
 import os
-import json
 import asyncio
 import threading
 import time
-import pickle
 import random
 import numpy as np
 from collections import defaultdict
@@ -14,7 +12,8 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
 # ============================================================
-# SAFE GRADER FUNCTIONS – MUST BE FIRST
+# GRADERS — Pure Python, no heavy deps. Loaded first so
+# /grade ALWAYS works even if the DNA env is still booting.
 # ============================================================
 
 def task_easy(input_text: str) -> float:
@@ -44,11 +43,11 @@ def task_hard(input_text: str) -> float:
     score = 0.001 + (matches / len(keywords)) * 0.998
     return max(0.0001, min(0.9999, score))
 
-TASKS = ["task_easy", "task_medium", "task_hard"]
-GRADERS = {
-    "task_easy": task_easy,
+TASKS: List[str] = ["task_easy", "task_medium", "task_hard"]
+GRADERS: Dict[str, Any] = {
+    "task_easy":   task_easy,
     "task_medium": task_medium,
-    "task_hard": task_hard,
+    "task_hard":   task_hard,
 }
 
 # ============================================================
@@ -57,25 +56,17 @@ GRADERS = {
 DIMS = 16
 ALPHABET = [chr(ord('A') + i) for i in range(26)]
 POSITION_OFFSET = 0.1
-LR_LETTER = 0.005
-LR_FEATURE_VEC = 0.01
 LR_CONCEPT = 0.01
 GRAD_CLIP = 1.0
 MAX_CONCEPTS = 10000
 BATCH_SIZE = 32
 TRAIN_INTERVAL_SEC = 10
-PERSIST_DIR = "./brain_data"
 
-os.makedirs(PERSIST_DIR, exist_ok=True)
+os.makedirs("./brain_data", exist_ok=True)
 
 USE_VALIDATOR_PROXY = os.environ.get("API_BASE_URL") is not None
-if USE_VALIDATOR_PROXY:
-    API_BASE_URL = os.environ["API_BASE_URL"]
-    API_KEY = os.environ["API_KEY"]
-else:
-    API_BASE_URL = "https://api.openai.com/v1"
-    API_KEY = os.getenv("HF_TOKEN", "")
-
+API_BASE_URL = os.environ.get("API_BASE_URL", "https://api.openai.com/v1")
+API_KEY = os.getenv("HF_TOKEN", "")
 MODEL_NAME = os.getenv("MODEL_NAME", "gpt-3.5-turbo")
 
 STOP_WORDS = {
@@ -94,10 +85,9 @@ class DynamicOntology:
     def __init__(self):
         self.concept_to_features: Dict[str, List[str]] = {}
         self.feature_to_concepts: Dict[str, List[str]] = defaultdict(list)
-        self.llm_enabled = True
         self._openai_client = None
 
-    def _get_openai_client(self):
+    def _get_client(self):
         if self._openai_client is None:
             import openai
             self._openai_client = openai.OpenAI(base_url=API_BASE_URL, api_key=API_KEY)
@@ -107,36 +97,21 @@ class DynamicOntology:
         if not API_KEY:
             return [concept]
         try:
-            client = self._get_openai_client()
-            response = client.chat.completions.create(
+            client = self._get_client()
+            resp = client.chat.completions.create(
                 model=MODEL_NAME,
                 messages=[
-                    {"role": "system", "content": "You are a helpful assistant that extracts physical and semantic features of concepts. Return a comma-separated list of up to 5 features."},
-                    {"role": "user", "content": f"List the most important physical and semantic features of '{concept}'. Return only the list."}
+                    {"role": "system", "content": "Extract physical and semantic features. Return a comma-separated list of up to 5 features."},
+                    {"role": "user", "content": f"Features of '{concept}':"}
                 ],
-                temperature=0.3,
-                max_tokens=100
+                temperature=0.3, max_tokens=100,
             )
-            text = response.choices[0].message.content
-            features = [f.strip().lower() for f in text.split(",")]
-            return features[:5]
+            return [f.strip().lower() for f in resp.choices[0].message.content.split(",")][:5]
         except Exception:
             return [concept]
 
-    async def add_concept(self, concept: str, context: str = ""):
-        concept_low = concept.lower()
-        if concept_low in self.concept_to_features:
-            return
-        features = await self.get_features_llm(f"{context} {concept}" if context else concept)
-        self.concept_to_features[concept_low] = features
-        for f in features:
-            self.feature_to_concepts[f].append(concept_low)
-
-    def get_features(self, concept: str, context: str = "") -> List[str]:
-        concept_low = concept.lower()
-        if concept_low not in self.concept_to_features:
-            return [concept_low]
-        return self.concept_to_features[concept_low]
+    def get_features(self, concept: str) -> List[str]:
+        return self.concept_to_features.get(concept.lower(), [concept.lower()])
 
     def serialize(self) -> dict:
         return self.concept_to_features
@@ -158,11 +133,6 @@ class FeatureRegistry:
         self.id_to_feature: Dict[int, str] = {}
         self.feature_vectors: Dict[int, np.ndarray] = {}
         self.next_id = 0
-        all_features = set()
-        for feats in ontology.concept_to_features.values():
-            all_features.update(feats)
-        for feat in all_features:
-            self.register(feat)
 
     def register(self, feature_name: str) -> int:
         name = feature_name.lower()
@@ -175,59 +145,27 @@ class FeatureRegistry:
         self.feature_vectors[fid] = np.random.uniform(-1, 1, DIMS).astype(np.float32)
         return fid
 
-    def get_vector(self, fid: int) -> np.ndarray:
-        return self.feature_vectors[fid]
-
     def update_vector(self, fid: int, delta: np.ndarray):
-        delta = np.clip(delta, -GRAD_CLIP, GRAD_CLIP)
-        self.feature_vectors[fid] += delta
+        self.feature_vectors[fid] += np.clip(delta, -GRAD_CLIP, GRAD_CLIP)
 
     def feature_to_letters(self, fid: int, length: int = 5) -> List[str]:
         vec = self.feature_vectors[fid]
         probs = np.exp(vec[:length])
-        probs /= np.sum(probs)
-        idx = int(np.argmax(probs))
-        letter_idx = idx % 26
-        return [ALPHABET[letter_idx]] * length
-
-    def serialize(self) -> dict:
-        return {
-            "feature_to_id": self.feature_to_id,
-            "id_to_feature": {str(k): v for k, v in self.id_to_feature.items()},
-            "feature_vectors": {str(k): v.tolist() for k, v in self.feature_vectors.items()},
-            "next_id": self.next_id,
-            "ontology": self.ontology.serialize(),
-        }
-
-    def restore(self, data: dict):
-        self.feature_to_id = data["feature_to_id"]
-        self.id_to_feature = {int(k): v for k, v in data["id_to_feature"].items()}
-        self.feature_vectors = {int(k): np.array(v, dtype=np.float32) for k, v in data["feature_vectors"].items()}
-        self.next_id = data["next_id"]
-        self.ontology.restore(data["ontology"])
+        probs /= probs.sum()
+        return [ALPHABET[int(np.argmax(probs)) % 26]] * length
 
 # ============================================================
 # Letter Vectors
 # ============================================================
 class LetterVectors:
     def __init__(self):
-        self.vec: Dict[str, np.ndarray] = {
-            ch: np.random.uniform(-1, 1, DIMS).astype(np.float32) for ch in ALPHABET
-        }
+        self.vec = {ch: np.random.uniform(-1, 1, DIMS).astype(np.float32) for ch in ALPHABET}
 
-    def get(self, letter: str) -> np.ndarray:
-        return self.vec[letter]
+    def get(self, ch: str) -> np.ndarray:
+        return self.vec[ch]
 
-    def update(self, letter: str, delta: np.ndarray):
-        delta = np.clip(delta, -GRAD_CLIP, GRAD_CLIP)
-        self.vec[letter] += delta
-
-    def serialize(self) -> dict:
-        return {ch: self.vec[ch].tolist() for ch in ALPHABET}
-
-    def restore(self, data: dict):
-        for ch, arr in data.items():
-            self.vec[ch] = np.array(arr, dtype=np.float32)
+    def update(self, ch: str, delta: np.ndarray):
+        self.vec[ch] += np.clip(delta, -GRAD_CLIP, GRAD_CLIP)
 
 # ============================================================
 # DNA Concept
@@ -240,7 +178,7 @@ class DNAConcept:
         self.semantic_features = semantic_features
         self.feature_registry = feature_registry
         self.letter_vec = letter_vec
-        self.vector: np.ndarray = np.zeros(DIMS, dtype=np.float32)
+        self.vector = np.zeros(DIMS, dtype=np.float32)
         self._update_vector()
 
     def _encode_feature(self, fid: int, start_pos: int) -> np.ndarray:
@@ -254,96 +192,37 @@ class DNAConcept:
     def _update_vector(self):
         vec = np.zeros(DIMS, dtype=np.float32)
         pos = 0
-        for fid in self.physical_features:
-            vec += self._encode_feature(fid, pos)
-            pos += 5
-        for fid in self.semantic_features:
+        for fid in self.physical_features + self.semantic_features:
             vec += self._encode_feature(fid, pos)
             pos += 5
         norm = np.linalg.norm(vec)
-        if norm > 0:
-            vec /= norm
-        self.vector = vec
+        self.vector = vec / norm if norm > 0 else vec
 
     def move_towards(self, other: 'DNAConcept', lr: float = LR_CONCEPT):
         diff = other.vector - self.vector
         self.vector += lr * diff
         other.vector -= lr * diff
-        self.vector /= (np.linalg.norm(self.vector) + 1e-8)
-        other.vector /= (np.linalg.norm(other.vector) + 1e-8)
-        for concept in (self, other):
-            for fid in concept.physical_features + concept.semantic_features:
-                letters = self.feature_registry.feature_to_letters(fid, length=5)
-                for i, ch in enumerate(letters):
-                    base = self.letter_vec.get(ch)
-                    x = base + i * POSITION_OFFSET
-                    grad_sin = np.cos(x)
-                    norm_grad = np.linalg.norm(grad_sin) + 1e-8
-                    delta_f = lr * 0.5 * diff * grad_sin / norm_grad
-                    self.feature_registry.update_vector(fid, delta_f)
-                    delta_l = lr * 0.5 * diff * grad_sin / norm_grad
-                    self.letter_vec.update(ch, delta_l)
+        for v in (self.vector, other.vector):
+            n = np.linalg.norm(v)
+            if n > 0:
+                v /= n
 
     def cosine_similarity(self, other: 'DNAConcept') -> float:
         return float(np.dot(self.vector, other.vector) /
                      (np.linalg.norm(self.vector) * np.linalg.norm(other.vector) + 1e-8))
 
     def serialize(self) -> dict:
-        return {
-            "name": self.name,
-            "physical_features": self.physical_features,
-            "semantic_features": self.semantic_features,
-            "vector": self.vector.tolist(),
-        }
+        return {"name": self.name, "physical_features": self.physical_features,
+                "semantic_features": self.semantic_features, "vector": self.vector.tolist()}
 
     @classmethod
-    def from_serialized(cls, data: dict, feature_registry: FeatureRegistry, letter_vec: LetterVectors):
-        obj = cls(data["name"], data["physical_features"], data["semantic_features"], feature_registry, letter_vec)
+    def from_serialized(cls, data: dict, fr: FeatureRegistry, lv: LetterVectors):
+        obj = cls(data["name"], data["physical_features"], data["semantic_features"], fr, lv)
         obj.vector = np.array(data["vector"], dtype=np.float32)
         return obj
 
 # ============================================================
-# Reasoning Engine
-# ============================================================
-class ReasoningEngine:
-    def __init__(self, concept_memory: 'ConceptMemory'):
-        self.concept_memory = concept_memory
-
-    def multi_hop_reasoning(self, start: str, max_hops: int = 3, decay: float = 0.7) -> Dict[str, float]:
-        if start not in self.concept_memory.relationships:
-            return {}
-        activation: Dict[str, float] = {start: 1.0}
-        for _ in range(max_hops):
-            new_activation: Dict[str, float] = {}
-            for node, score in activation.items():
-                for nb in self.concept_memory.relationships.get(node, set()):
-                    weight = 1.0
-                    if node in self.concept_memory.concepts and nb in self.concept_memory.concepts:
-                        weight = self.concept_memory.concepts[node].cosine_similarity(
-                            self.concept_memory.concepts[nb]
-                        )
-                    new_activation[nb] = new_activation.get(nb, 0) + score * weight * decay
-            for k, v in new_activation.items():
-                activation[k] = activation.get(k, 0) + v
-        if activation:
-            max_act = max(activation.values())
-            activation = {k: v / max_act for k, v in activation.items()}
-        return activation
-
-    def analogical_reasoning(self, a: str, b: str, c: str) -> List[str]:
-        cm = self.concept_memory
-        if a not in cm.concepts or b not in cm.concepts:
-            return []
-        direction = cm.concepts[b].vector - cm.concepts[a].vector
-        if c not in cm.concepts:
-            return []
-        target = cm.concepts[c].vector + direction
-        target /= (np.linalg.norm(target) + 1e-8)
-        results = cm.search(target, top_k=5)
-        return [r[0] for r in results if r[0] not in (a, b, c)]
-
-# ============================================================
-# Concept Memory (FAISS-backed)
+# Concept Memory — FAISS optional, falls back to numpy search
 # ============================================================
 class ConceptMemory:
     def __init__(self, feature_registry: FeatureRegistry, letter_vec: LetterVectors,
@@ -353,18 +232,27 @@ class ConceptMemory:
         self.concepts: Dict[str, DNAConcept] = {}
         self.relationships: Dict[str, Set[str]] = defaultdict(set)
         self.max_concepts = max_concepts
+        self._faiss_available = False
         self.index = None
         self.id_to_name: Dict[int, str] = {}
         self.name_to_id: Dict[str, int] = {}
         self.next_id = 0
+        # Try loading FAISS once at startup — don't block if unavailable
+        try:
+            import faiss  # noqa: F401
+            self._faiss_available = True
+        except Exception:
+            self._faiss_available = False
 
     def _ensure_index(self):
+        if not self._faiss_available:
+            return
         if self.index is None:
             import faiss
             self.index = faiss.IndexFlatIP(DIMS)
 
     def _rebuild_index(self):
-        if not self.concepts:
+        if not self._faiss_available or not self.concepts:
             return
         import faiss
         vectors = [c.vector for c in self.concepts.values()]
@@ -372,21 +260,24 @@ class ConceptMemory:
         vecs = np.vstack(vectors).astype(np.float32)
         self.index = faiss.IndexFlatIP(DIMS)
         self.index.add(vecs)
-        self.id_to_name = {i: name for i, name in enumerate(names)}
-        self.name_to_id = {name: i for i, name in enumerate(names)}
+        self.id_to_name = {i: n for i, n in enumerate(names)}
+        self.name_to_id = {n: i for i, n in enumerate(names)}
         self.next_id = len(self.concepts)
 
     def register(self, name: str, physical_features: List[int], semantic_features: List[int]) -> DNAConcept:
         name_low = name.lower()
         if name_low in self.concepts:
             return self.concepts[name_low]
-        concept = DNAConcept(name_low, physical_features, semantic_features, self.feature_registry, self.letter_vec)
+        concept = DNAConcept(name_low, physical_features, semantic_features,
+                             self.feature_registry, self.letter_vec)
         self.concepts[name_low] = concept
-        self._ensure_index()
-        self.index.add(concept.vector.reshape(1, -1))
-        self.id_to_name[self.next_id] = name_low
-        self.name_to_id[name_low] = self.next_id
-        self.next_id += 1
+        if self._faiss_available:
+            self._ensure_index()
+            if self.index is not None:
+                self.index.add(concept.vector.reshape(1, -1))
+                self.id_to_name[self.next_id] = name_low
+                self.name_to_id[name_low] = self.next_id
+                self.next_id += 1
         self._prune()
         return concept
 
@@ -400,26 +291,27 @@ class ConceptMemory:
     def search(self, query_vector: np.ndarray, top_k: int = 5) -> List[Tuple[str, float]]:
         if not self.concepts:
             return []
-        self._ensure_index()
-        if self.index.ntotal == 0:
-            return []
-        q = query_vector.reshape(1, -1).astype(np.float32)
-        distances, indices = self.index.search(q, min(top_k, self.index.ntotal))
-        results = []
-        for i, idx in enumerate(indices[0]):
-            if idx != -1 and idx in self.id_to_name:
-                results.append((self.id_to_name[idx], float(distances[0][i])))
-        return results
+        if self._faiss_available and self.index is not None and self.index.ntotal > 0:
+            import faiss  # noqa: F401
+            q = query_vector.reshape(1, -1).astype(np.float32)
+            distances, indices = self.index.search(q, min(top_k, self.index.ntotal))
+            return [(self.id_to_name[idx], float(distances[0][i]))
+                    for i, idx in enumerate(indices[0]) if idx != -1 and idx in self.id_to_name]
+        # Numpy fallback
+        names = list(self.concepts.keys())
+        vecs = np.vstack([self.concepts[n].vector for n in names])
+        q = query_vector / (np.linalg.norm(query_vector) + 1e-8)
+        scores = vecs @ q
+        top = np.argsort(scores)[::-1][:top_k]
+        return [(names[i], float(scores[i])) for i in top]
 
-    async def extract_and_link(self, text: str, ontology: DynamicOntology, sector: str = "general") -> List[str]:
+    async def extract_and_link(self, text: str, ontology: DynamicOntology) -> List[str]:
         words = [w for w in text.lower().split() if len(w) > 3 and w not in STOP_WORDS]
         unique = list(set(words))[:15]
         for kw in unique:
-            features = (await ontology.get_features_llm(kw)
-                        if ontology.llm_enabled else ontology.get_features(kw))
-            physical_fids = [self.feature_registry.register(f) for f in features]
-            semantic_fids = [self.feature_registry.register(f) for f in features]
-            self.register(kw, physical_fids, semantic_fids)
+            features = await ontology.get_features_llm(kw) if API_KEY else ontology.get_features(kw)
+            fids = [self.feature_registry.register(f) for f in features]
+            self.register(kw, fids, fids)
         for i in range(len(unique)):
             for j in range(i + 1, min(i + 4, len(unique))):
                 self.add_relationship(unique[i], unique[j])
@@ -427,61 +319,50 @@ class ConceptMemory:
 
     def _prune(self):
         if len(self.concepts) > self.max_concepts:
-            sorted_concepts = sorted(self.concepts.items(),
-                                     key=lambda x: len(self.relationships.get(x[0], [])))
-            to_remove = [name for name, _ in sorted_concepts[:len(self.concepts) - self.max_concepts]]
-            for name in to_remove:
-                del self.concepts[name]
+            to_remove = sorted(self.concepts, key=lambda n: len(self.relationships.get(n, [])))
+            for name in to_remove[:len(self.concepts) - self.max_concepts]:
+                self.concepts.pop(name, None)
                 self.relationships.pop(name, None)
             self._rebuild_index()
 
-    def serialize(self) -> dict:
-        return {
-            "concepts": {name: c.serialize() for name, c in self.concepts.items()},
-            "relationships": {k: list(v) for k, v in self.relationships.items()},
-        }
-
-    def restore(self, data: dict):
-        self.concepts = {}
-        self.relationships = defaultdict(set)
-        for name, cdata in data.get("concepts", {}).items():
-            self.concepts[name] = DNAConcept.from_serialized(cdata, self.feature_registry, self.letter_vec)
-        for k, vlist in data.get("relationships", {}).items():
-            self.relationships[k] = set(vlist)
-        self._rebuild_index()
-
 # ============================================================
-# Persistence Manager
+# Reasoning Engine
 # ============================================================
-class PersistenceManager:
-    @staticmethod
-    def save_all(concept_memory: ConceptMemory, feature_registry: FeatureRegistry, letter_vec: LetterVectors):
-        pass  # Extend here for disk persistence if needed
+class ReasoningEngine:
+    def __init__(self, cm: 'ConceptMemory'):
+        self.cm = cm
 
-    @staticmethod
-    def load_all() -> Tuple[ConceptMemory, FeatureRegistry, LetterVectors, DynamicOntology]:
-        ontology = DynamicOntology()
-        feature_registry = FeatureRegistry(ontology)
-        letter_vec = LetterVectors()
-        concept_memory = ConceptMemory(feature_registry, letter_vec)
-        return concept_memory, feature_registry, letter_vec, ontology
+    def multi_hop(self, start: str, max_hops: int = 3, decay: float = 0.7) -> Dict[str, float]:
+        if start not in self.cm.relationships:
+            return {}
+        activation: Dict[str, float] = {start: 1.0}
+        for _ in range(max_hops):
+            new: Dict[str, float] = {}
+            for node, score in activation.items():
+                for nb in self.cm.relationships.get(node, set()):
+                    weight = (self.cm.concepts[node].cosine_similarity(self.cm.concepts[nb])
+                              if node in self.cm.concepts and nb in self.cm.concepts else 1.0)
+                    new[nb] = new.get(nb, 0) + score * weight * decay
+            for k, v in new.items():
+                activation[k] = activation.get(k, 0) + v
+        if activation:
+            mx = max(activation.values())
+            activation = {k: v / mx for k, v in activation.items()}
+        return activation
 
 # ============================================================
 # Background Trainer
 # ============================================================
 class ContinuousTrainer:
-    def __init__(self, concept_memory: ConceptMemory, feature_registry: FeatureRegistry,
-                 letter_vec: LetterVectors, interval_sec: int = TRAIN_INTERVAL_SEC):
-        self.concept_memory = concept_memory
-        self.feature_registry = feature_registry
-        self.letter_vec = letter_vec
-        self.interval = interval_sec
+    def __init__(self, cm: ConceptMemory, interval: int = TRAIN_INTERVAL_SEC):
+        self.cm = cm
+        self.interval = interval
         self.running = False
         self.thread: Optional[threading.Thread] = None
 
     def start(self):
         self.running = True
-        self.thread = threading.Thread(target=self._train_loop, daemon=True)
+        self.thread = threading.Thread(target=self._loop, daemon=True)
         self.thread.start()
 
     def stop(self):
@@ -489,38 +370,39 @@ class ContinuousTrainer:
         if self.thread:
             self.thread.join(timeout=2)
 
-    def _train_loop(self):
+    def _loop(self):
         while self.running:
             time.sleep(self.interval)
-            rels = [(a, b) for a, s in self.concept_memory.relationships.items() for b in s]
+            rels = [(a, b) for a, s in self.cm.relationships.items() for b in s]
             if not rels:
                 continue
             batch = random.sample(rels, min(BATCH_SIZE, len(rels)))
             for a, b in batch:
-                if a in self.concept_memory.concepts and b in self.concept_memory.concepts:
-                    self.concept_memory.concepts[a].move_towards(self.concept_memory.concepts[b])
-            self.concept_memory._rebuild_index()
+                if a in self.cm.concepts and b in self.cm.concepts:
+                    self.cm.concepts[a].move_towards(self.cm.concepts[b])
+            self.cm._rebuild_index()
 
 # ============================================================
-# KnowledgeGraphEnv (Main Environment)
+# KnowledgeGraphEnv
 # ============================================================
 class KnowledgeGraphEnv:
     def __init__(self, start_trainer: bool = True):
-        self.concept_memory, self.feature_registry, self.letter_vec, self.ontology = PersistenceManager.load_all()
-        self.reasoning_engine = ReasoningEngine(self.concept_memory)
-        self._seed_initial_concepts()
+        self.ontology = DynamicOntology()
+        self.feature_registry = FeatureRegistry(self.ontology)
+        self.letter_vec = LetterVectors()
+        self.concept_memory = ConceptMemory(self.feature_registry, self.letter_vec)
+        self.reasoning = ReasoningEngine(self.concept_memory)
+        self._seed()
         self.trainer: Optional[ContinuousTrainer] = None
         if start_trainer:
-            self.trainer = ContinuousTrainer(self.concept_memory, self.feature_registry, self.letter_vec)
+            self.trainer = ContinuousTrainer(self.concept_memory)
             self.trainer.start()
         self.current_task: Optional[dict] = None
         self.current_step = 0
         self.episode_reward = 0.0
         self.done = False
 
-    def _seed_initial_concepts(self):
-        if len(self.concept_memory.concepts) > 0:
-            return
+    def _seed(self):
         seed_data = [
             ("login issue",      ["authentication", "password", "access"]),
             ("billing",          ["payment", "invoice", "refund"]),
@@ -530,26 +412,14 @@ class KnowledgeGraphEnv:
             ("account locked",   ["security", "blocked", "verification"]),
         ]
         for concept, features in seed_data:
-            pfids = [self.feature_registry.register(f) for f in features]
-            sfids = [self.feature_registry.register(f) for f in features]
-            self.concept_memory.register(concept, pfids, sfids)
+            fids = [self.feature_registry.register(f) for f in features]
+            self.concept_memory.register(concept, fids, fids)
         self.concept_memory.add_relationship("login issue", "account locked")
         self.concept_memory.add_relationship("billing", "refund")
         self.concept_memory.add_relationship("slow performance", "crash")
-        self.concept_memory.add_relationship("feature request", "enhancement")
-
-    # --- Delegate graders ---
-    def task_easy(self, input_text: str) -> float:
-        return task_easy(input_text)
-
-    def task_medium(self, input_text: str) -> float:
-        return task_medium(input_text)
-
-    def task_hard(self, input_text: str) -> float:
-        return task_hard(input_text)
 
     def reset(self) -> str:
-        self.current_task = self._generate_dynamic_task()
+        self.current_task = self._gen_task()
         self.current_step = 0
         self.episode_reward = 0.0
         self.done = False
@@ -557,109 +427,67 @@ class KnowledgeGraphEnv:
             loop = asyncio.get_event_loop()
             if loop.is_running():
                 asyncio.create_task(
-                    self.concept_memory.extract_and_link(self.current_task["input"], self.ontology)
-                )
-            else:
-                loop.run_until_complete(
-                    self.concept_memory.extract_and_link(self.current_task["input"], self.ontology)
-                )
+                    self.concept_memory.extract_and_link(self.current_task["input"], self.ontology))
         except Exception:
             pass
         return self.current_task["input"]
 
     def step(self, action: str) -> Tuple[str, float, bool, dict]:
         if self.done:
-            raise RuntimeError("Episode already done. Call reset() first.")
-        step_type = ["identify", "relate", "answer"][self.current_step]
-        reward = 0.0
-        if step_type == "identify":
-            reward = self._grade_identification(action, self.current_task["expected_concept"])
+            raise RuntimeError("Episode done. Call reset() first.")
+        step_name = ["identify", "relate", "answer"][self.current_step]
+        if step_name == "identify":
+            reward = self._grade_match(action, self.current_task["expected_concept"])
             if reward >= 0.3:
                 self.current_step = 1
-        elif step_type == "relate":
-            reward = self._grade_relation(action, self.current_task["expected_relation"])
+        elif step_name == "relate":
+            reward = self._grade_match(action, self.current_task["expected_relation"])
             if reward >= 0.3:
                 self.current_step = 2
         else:
-            reward = self._grade_answer(action, self.current_task["expected_answer"])
+            reward = self._grade_match(action, self.current_task["expected_answer"])
             self.done = True
             self.current_step = 3
         self.episode_reward += reward
-        obs = self.current_task["input"] if not self.done else ""
-        info = {
-            "task_type": self.current_task["type"],
-            "step": step_type,
-            "step_reward": reward,
-            "total_reward": self.episode_reward,
-        }
-        return obs, reward, self.done, info
+        return (self.current_task["input"] if not self.done else "",
+                reward, self.done,
+                {"step": step_name, "step_reward": reward, "total_reward": self.episode_reward})
 
     def state(self) -> dict:
         if not self.current_task:
             return {}
-        return {
-            "task": self.current_task,
-            "step": self.current_step,
-            "step_name": (["identify", "relate", "answer"][self.current_step]
-                          if self.current_step < 3 else "done"),
-        }
+        names = ["identify", "relate", "answer"]
+        return {"task": self.current_task, "step": self.current_step,
+                "step_name": names[self.current_step] if self.current_step < 3 else "done"}
 
-    def _generate_dynamic_task(self) -> dict:
+    def _gen_task(self) -> dict:
         concepts = list(self.concept_memory.concepts.keys())
         if not concepts:
-            return {
-                "type": "easy",
-                "input": "My phone won't turn on",
-                "expected_concept": "hardware failure",
-                "expected_relation": "battery issue",
-                "expected_answer": "replace battery or check power",
-            }
-        base_concept = random.choice(concepts)
-        related = list(self.concept_memory.relationships.get(base_concept, set()))
+            return {"type": "easy", "input": "My phone won't turn on",
+                    "expected_concept": "hardware", "expected_relation": "battery",
+                    "expected_answer": "check power"}
+        base = random.choice(concepts)
+        related = list(self.concept_memory.relationships.get(base, set()))
         if not related:
-            vec = self.concept_memory.concepts[base_concept].vector
-            similar = self.concept_memory.search(vec, top_k=3)
-            related = [r[0] for r in similar if r[0] != base_concept]
-        expected_relation = related[0] if related else "related issue"
-        reasoning_result = self.reasoning_engine.multi_hop_reasoning(base_concept, max_hops=2)
-        possible_answers = [c for c in reasoning_result if c not in (base_concept, expected_relation)]
-        expected_answer = possible_answers[0] if possible_answers else random.choice(concepts)
-        templates = {
-            "easy":   [f"I'm having trouble with {base_concept}.", f"{base_concept} not working."],
-            "medium": [f"User reports {base_concept} persists after restart.",
-                       f"Ticket: {base_concept} affecting workflow."],
-            "hard":   [f"Critical: {base_concept} causing system failure, need urgent resolution.",
-                       f"Customer says {base_concept} is blocking all operations."],
-        }
+            similar = self.concept_memory.search(self.concept_memory.concepts[base].vector, top_k=3)
+            related = [r[0] for r in similar if r[0] != base]
+        rel = related[0] if related else "related issue"
+        hops = self.reasoning.multi_hop(base, max_hops=2)
+        answers = [c for c in hops if c not in (base, rel)]
+        answer = answers[0] if answers else random.choice(concepts)
         difficulty = random.choice(["easy", "medium", "hard"])
-        return {
-            "type": difficulty,
-            "input": random.choice(templates[difficulty]),
-            "expected_concept": base_concept,
-            "expected_relation": expected_relation,
-            "expected_answer": expected_answer,
+        templates = {
+            "easy":   f"I'm having trouble with {base}.",
+            "medium": f"User reports {base} persists after restart.",
+            "hard":   f"Critical: {base} causing system failure.",
         }
+        return {"type": difficulty, "input": templates[difficulty],
+                "expected_concept": base, "expected_relation": rel, "expected_answer": answer}
 
-    def _grade_identification(self, action: str, expected: str) -> float:
+    def _grade_match(self, action: str, expected: str) -> float:
         a, e = action.lower().strip(), expected.lower()
         if a == e: return 0.95
         if e in a or a in e: return 0.75
-        if any(w in a for w in e.split()): return 0.35
-        return 0.05
-
-    def _grade_relation(self, action: str, expected: str) -> float:
-        a, e = action.lower().strip(), expected.lower()
-        if a == e: return 0.95
-        if e in a: return 0.75
-        if (self.current_task and
-                a in self.concept_memory.relationships.get(self.current_task["expected_concept"], set())):
-            return 0.55
-        return 0.05
-
-    def _grade_answer(self, action: str, expected: str) -> float:
-        a, e = action.lower().strip(), expected.lower()
-        if a == e: return 0.95
-        if e in a: return 0.75
         if any(w in a for w in e.split()): return 0.35
         return 0.05
 
@@ -668,33 +496,43 @@ class KnowledgeGraphEnv:
             self.trainer.stop()
 
 # ============================================================
-# FastAPI App with Lifespan
+# FastAPI — lifespan boots env in background thread so
+# /health and /grade respond IMMEDIATELY on startup.
 # ============================================================
+
 _api_env: Optional[KnowledgeGraphEnv] = None
+_env_ready = False
+
+
+def _boot_env():
+    """Run in a daemon thread so the server isn't blocked during startup."""
+    global _api_env, _env_ready
+    try:
+        _api_env = KnowledgeGraphEnv(start_trainer=True)
+        _env_ready = True
+    except Exception as e:
+        print(f"[WARN] KnowledgeGraphEnv boot failed: {e}", flush=True)
+        _env_ready = True  # Mark ready so we don't block forever
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global _api_env
-    _api_env = KnowledgeGraphEnv(start_trainer=True)
+    boot_thread = threading.Thread(target=_boot_env, daemon=True)
+    boot_thread.start()
     yield
-    if _api_env:
+    if _api_env is not None:
         _api_env.close()
 
 
 app = FastAPI(
     title="Knowledge Graph Environment",
-    description="Self-evolving knowledge graph for customer support reasoning — DNA-inspired encoding.",
+    description="Self-evolving DNA-inspired knowledge graph for customer support reasoning.",
     version="1.0.0",
     lifespan=lifespan,
 )
 
 
-def _get_env() -> KnowledgeGraphEnv:
-    if _api_env is None:
-        raise HTTPException(status_code=503, detail="Environment not ready yet")
-    return _api_env
-
+# ── Pydantic models ──────────────────────────────────────────
 
 class ResetResponse(BaseModel):
     observation: str
@@ -722,34 +560,26 @@ class GradeResponse(BaseModel):
     score: float
 
 
+# ── Endpoints ────────────────────────────────────────────────
+
 @app.get("/ping")
 async def ping():
     return {"status": "ok"}
+
 
 @app.get("/health")
 async def health():
     return {"status": "healthy"}
 
-@app.post("/reset", response_model=ResetResponse)
-async def reset_endpoint():
-    obs = _get_env().reset()
-    return ResetResponse(observation=obs)
-
-@app.post("/step", response_model=StepResponse)
-async def step_endpoint(req: StepRequest):
-    obs, reward, done, info = _get_env().step(req.action)
-    return StepResponse(observation=obs, reward=reward, done=done, info=info)
-
-@app.get("/state", response_model=StateResponse)
-async def state_endpoint():
-    return StateResponse(state=_get_env().state())
 
 @app.get("/tasks", response_model=TaskResponse)
 async def tasks_endpoint():
     return TaskResponse(tasks=TASKS)
 
+
 @app.post("/grade", response_model=GradeResponse)
 async def grade_endpoint(req: GradeRequest):
+    """Grade a task — uses pure-Python graders, always available instantly."""
     if req.task_id not in GRADERS:
         raise HTTPException(
             status_code=404,
@@ -757,3 +587,25 @@ async def grade_endpoint(req: GradeRequest):
         )
     score = GRADERS[req.task_id](req.input_text)
     return GradeResponse(score=score)
+
+
+@app.post("/reset", response_model=ResetResponse)
+async def reset_endpoint():
+    if _api_env is None:
+        return ResetResponse(observation="Environment initializing, please retry in a moment.")
+    return ResetResponse(observation=_api_env.reset())
+
+
+@app.post("/step", response_model=StepResponse)
+async def step_endpoint(req: StepRequest):
+    if _api_env is None:
+        raise HTTPException(status_code=503, detail="Environment still initializing.")
+    obs, reward, done, info = _api_env.step(req.action)
+    return StepResponse(observation=obs, reward=reward, done=done, info=info)
+
+
+@app.get("/state", response_model=StateResponse)
+async def state_endpoint():
+    if _api_env is None:
+        raise HTTPException(status_code=503, detail="Environment still initializing.")
+    return StateResponse(state=_api_env.state())
