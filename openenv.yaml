@@ -1,13 +1,13 @@
 name: knowledge_graph_env
-description: Customer support ticket triage with self‑evolving knowledge graph.
+description: Customer support ticket triage with self-evolving knowledge graph.
 version: "1.0.0"
 tasks:
   - id: task_easy
     name: "Intent Identification"
-    grader: "graders:task_easy"
+    grader: "task_easy"
   - id: task_medium
     name: "Relational Mapping"
-    grader: "graders:task_medium"
+    grader: "task_medium"
   - id: task_hard
     name: "Resolution Answer"
-    grader: "graders:task_hard"
+    grader: "task_hard"
