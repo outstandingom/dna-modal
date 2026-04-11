@@ -76,7 +76,7 @@ def log_step(step: int, action: str, reward: float, done: bool,
 def log_end(success: bool, steps: int, score: float, rewards: List[float]) -> None:
     r_str = ",".join(f"{r:.2f}" for r in rewards)
     print(
-        f"[END] success={str(success).lower()} steps={steps} rewards={r_str}",
+        f"[END] success={str(success).lower()} steps={steps} score={score:.2f} rewards={r_str}",
         flush=True,
     )
 
@@ -109,10 +109,10 @@ async def grade(http: httpx.AsyncClient, task_id: str, action: str) -> float:
             timeout=30.0,
         )
         r.raise_for_status()
-        return float(r.json().get("score", 0.0))
+        return float(r.json().get("score", 0.01))
     except Exception as exc:
         print(f"[DEBUG] /grade failed for {task_id}: {exc}", file=sys.stderr, flush=True)
-        return 0.0
+        return 0.01
 
 # ── Single-task runner ────────────────────────────────────────────────────────
 async def run_task(
@@ -135,7 +135,7 @@ async def run_task(
 
         # Grade the action via the environment's /grade endpoint
         reward = await grade(http, task_id, action)
-        reward = max(0.01, min(0.99, reward))
+        reward = max(0.01, min(0.99, reward))  # strict (0, 1) range
 
         done  = (step == MAX_STEPS)
         error = None
