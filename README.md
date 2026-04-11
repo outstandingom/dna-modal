@@ -98,7 +98,7 @@ All graders are **deterministic** and return a score between 0.0 and 1.0.
 
 
 ---
-## hugging face url 
+## hugging face url  🚀
 
 https://huggingface.co/spaces/OutstandingOm/knowledge-graph-env
 
