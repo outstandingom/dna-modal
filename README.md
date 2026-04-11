@@ -96,7 +96,11 @@ All graders are **deterministic** and return a score between 0.0 and 1.0.
 - **Educational tutoring systems** – track student misconceptions.
 - **Legal case law analysis** – link new precedents to old rulings.
 
+
 ---
+## hugging face url 
+
+https://huggingface.co/spaces/OutstandingOm/knowledge-graph-env
 
 ## 🛠️ How to Run
 
