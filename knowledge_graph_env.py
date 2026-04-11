@@ -782,3 +782,13 @@ async def state_endpoint():
     if _api_env is None:
         raise HTTPException(status_code=503, detail="Environment still initializing.")
     return StateResponse(state=_api_env.state())
+
+
+@app.get("/")
+async def root():
+    return {
+        "name": "Knowledge Graph Environment",
+        "status": "online",
+        "message": "Welcome to the OpenEnv API. Append /docs to view the Swagger UI."
+    }
+    
