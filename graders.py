@@ -54,7 +54,7 @@ def _llm_judge(agent_response: str, task_description: str, rubric: str) -> float
         )
         raw = (resp.choices[0].message.content or "").strip()
         score = float(raw)
-        return max(0.0001, min(0.9999, score))
+        return max(0.01, min(0.99, score))
     except Exception:
         return _keyword_fallback(agent_response, rubric)
 
@@ -70,8 +70,8 @@ def _keyword_fallback(text: str, rubric: str) -> float:
     if not keywords:
         return 0.001
     matches = sum(1 for kw in keywords if kw in text_lower)
-    score = 0.001 + (matches / len(keywords)) * 0.998
-    return max(0.0001, min(0.9999, score))
+    score = 0.01 + (matches / len(keywords)) * 0.98
+    return max(0.01, min(0.99, score))
 
 
 # ── Task graders ──────────────────────────────────────────────────────────────

@@ -418,7 +418,7 @@ class KnowledgeGraphEnv:
         # Otherwise, if we hit 3 steps and it's not solved, end it.
         if self.current_step >= 3:
             self.done = True
-            return ("", 0.0, True, {"step": "failed", "total_reward": self.episode_reward})
+            return ("", 0.01, True, {"step": "failed", "total_reward": self.episode_reward})
 
         # Give partial credit for intermediate thoughts to guide the agent
         self.episode_reward += reward

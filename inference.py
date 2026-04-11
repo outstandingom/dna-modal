@@ -135,7 +135,7 @@ async def run_task(
 
         # Grade the action via the environment's /grade endpoint
         reward = await grade(http, task_id, action)
-        reward = max(0.0001, min(0.9999, reward))
+        reward = max(0.01, min(0.99, reward))
 
         done  = (step == MAX_STEPS)
         error = None
