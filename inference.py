@@ -7,7 +7,7 @@ Runs 3 tasks (task_easy, task_medium, task_hard), grades each via the
 
     [START] task=<task_name> env=<benchmark> model=<model_name>
     [STEP]  step=<n> action=<action_str> reward=<0.00> done=<true|false> error=<msg|null>
-    [END]   success=<true|false> steps=<n> score=<score> rewards=<r1,r2,...,rn>
+    [END]   success=<true|false> steps=<n> rewards=<r1,r2,...,rn>
 """
 
 import os
@@ -74,9 +74,11 @@ def log_step(step: int, action: str, reward: float, done: bool,
     )
 
 def log_end(success: bool, steps: int, score: float, rewards: List[float]) -> None:
+    # Notice we keep 'score' in the function arguments to calculate success, 
+    # but we DO NOT print it in the string below to comply with the Hackathon Regex parser.
     r_str = ",".join(f"{r:.2f}" for r in rewards)
     print(
-        f"[END] success={str(success).lower()} steps={steps} score={score:.2f} rewards={r_str}",
+        f"[END] success={str(success).lower()} steps={steps} rewards={r_str}",
         flush=True,
     )
 
@@ -101,7 +103,7 @@ def get_llm_action(client: OpenAI, system: str, user: str) -> str:
 
 # ── Grade helper ──────────────────────────────────────────────────────────────
 async def grade(http: httpx.AsyncClient, task_id: str, action: str) -> float:
-    """POST to /grade and return the score, or 0.0 on failure."""
+    """POST to /grade and return the score, or 0.01 on failure."""
     try:
         r = await http.post(
             f"{ENV_URL}/grade",
