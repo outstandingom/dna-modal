@@ -12,43 +12,11 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
 # ============================================================
-# GRADERS — Pure Python, no heavy deps. Loaded first so
-# /grade ALWAYS works even if the DNA env is still booting.
+# GRADERS — imported from graders.py (LLM-as-a-Judge).
+# Loaded first so /grade ALWAYS works even if the DNA env
+# is still booting.
 # ============================================================
-
-def task_easy(input_text: str) -> float:
-    if not isinstance(input_text, str) or not input_text:
-        return 0.0012345
-    text = input_text.lower().strip()
-    keywords = ["login", "account", "password", "access", "sign in"]
-    matches = sum(1 for kw in keywords if kw in text)
-    score = 0.001 + (matches / len(keywords)) * 0.998
-    return max(0.0001, min(0.9999, score))
-
-def task_medium(input_text: str) -> float:
-    if not isinstance(input_text, str) or not input_text:
-        return 0.0023456
-    text = input_text.lower().strip()
-    keywords = ["bill", "payment", "charge", "invoice", "refund", "subscription"]
-    matches = sum(1 for kw in keywords if kw in text)
-    score = 0.001 + (matches / len(keywords)) * 0.998
-    return max(0.0001, min(0.9999, score))
-
-def task_hard(input_text: str) -> float:
-    if not isinstance(input_text, str) or not input_text:
-        return 0.0034567
-    text = input_text.lower().strip()
-    keywords = ["locked", "failed", "security", "blocked", "breach", "critical"]
-    matches = sum(1 for kw in keywords if kw in text)
-    score = 0.001 + (matches / len(keywords)) * 0.998
-    return max(0.0001, min(0.9999, score))
-
-TASKS: List[str] = ["task_easy", "task_medium", "task_hard"]
-GRADERS: Dict[str, Any] = {
-    "task_easy":   task_easy,
-    "task_medium": task_medium,
-    "task_hard":   task_hard,
-}
+from graders import TASKS, GRADERS
 
 # ============================================================
 # Configuration
@@ -428,30 +396,33 @@ class KnowledgeGraphEnv:
             if loop.is_running():
                 asyncio.create_task(
                     self.concept_memory.extract_and_link(self.current_task["input"], self.ontology))
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[DEBUG] Background extraction failed: {e}", flush=True)
         return self.current_task["input"]
 
     def step(self, action: str) -> Tuple[str, float, bool, dict]:
         if self.done:
             raise RuntimeError("Episode done. Call reset() first.")
-        step_name = ["identify", "relate", "answer"][self.current_step]
-        if step_name == "identify":
-            reward = self._grade_match(action, self.current_task["expected_concept"])
-            if reward >= 0.3:
-                self.current_step = 1
-        elif step_name == "relate":
-            reward = self._grade_match(action, self.current_task["expected_relation"])
-            if reward >= 0.3:
-                self.current_step = 2
-        else:
-            reward = self._grade_match(action, self.current_task["expected_answer"])
+
+        self.current_step += 1
+
+        # Check if the agent's action solves the ultimate problem
+        reward = self._grade_match(action, self.current_task["expected_answer"])
+
+        # If the reward is high enough, the agent solved it! End early.
+        if reward >= 0.75:
             self.done = True
-            self.current_step = 3
+            self.episode_reward += reward
+            return ("", reward, True, {"step": "solved", "total_reward": self.episode_reward})
+
+        # Otherwise, if we hit 3 steps and it's not solved, end it.
+        if self.current_step >= 3:
+            self.done = True
+            return ("", 0.0, True, {"step": "failed", "total_reward": self.episode_reward})
+
+        # Give partial credit for intermediate thoughts to guide the agent
         self.episode_reward += reward
-        return (self.current_task["input"] if not self.done else "",
-                reward, self.done,
-                {"step": step_name, "step_reward": reward, "total_reward": self.episode_reward})
+        return (self.current_task["input"], reward, False, {"step": "working", "total_reward": self.episode_reward})
 
     def state(self) -> dict:
         if not self.current_task:
@@ -477,9 +448,9 @@ class KnowledgeGraphEnv:
         answer = answers[0] if answers else random.choice(concepts)
         difficulty = random.choice(["easy", "medium", "hard"])
         templates = {
-            "easy":   f"I'm having trouble with {base}.",
-            "medium": f"User reports {base} persists after restart.",
-            "hard":   f"Critical: {base} causing system failure.",
+            "easy":   f"hey guys im having trouble with {base} can u fix it ASAP??",
+            "medium": f"User ticket #4092: {base} persists after a hard restart. Also the dashboard is lagging. Pls advise.",
+            "hard":   f"URGENT: {base} is causing a cascade failure in production. The entire system is blocked. We need an emergency patch immediately.",
         }
         return {"type": difficulty, "input": templates[difficulty],
                 "expected_concept": base, "expected_relation": rel, "expected_answer": answer}

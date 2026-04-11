@@ -19,9 +19,13 @@ import httpx
 from openai import OpenAI
 
 # ── Environment variables ─────────────────────────────────────────────────────
+HF_TOKEN = os.getenv("HF_TOKEN")
+if HF_TOKEN is None:
+    raise ValueError("HF_TOKEN environment variable is required")
+
 API_BASE_URL  = os.getenv("API_BASE_URL", "https://router.huggingface.co/v1")
-API_KEY       = os.getenv("HF_TOKEN") or os.getenv("API_KEY", "")
 MODEL_NAME    = os.getenv("MODEL_NAME", "Qwen/Qwen2.5-72B-Instruct")
+API_KEY       = HF_TOKEN
 # Space URL — during hackathon eval this is the live HF Space
 ENV_URL       = os.getenv("ENV_URL",
                            "https://outstandingom-knowledge-graph-env.hf.space").rstrip("/")
@@ -69,12 +73,10 @@ def log_step(step: int, action: str, reward: float, done: bool,
         flush=True,
     )
 
-def log_end(success: bool, steps: int, score: float,
-            rewards: List[float]) -> None:
+def log_end(success: bool, steps: int, score: float, rewards: List[float]) -> None:
     r_str = ",".join(f"{r:.2f}" for r in rewards)
     print(
-        f"[END] success={str(success).lower()} steps={steps} "
-        f"score={score:.2f} rewards={r_str}",
+        f"[END] success={str(success).lower()} steps={steps} rewards={r_str}",
         flush=True,
     )
 
