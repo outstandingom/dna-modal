@@ -93,6 +93,8 @@ class RelationshipColor(Enum):
     RELATED_TO = "RELATED"  # General relationship
     CAUSES = "CAUSES"       # Login failure CAUSES account lock
     PART_OF = "PART_OF"     # Chhindwara PART_OF MadhyaPradesh
+    OPERATOR = "OPERATOR"   # For instruction DNA (e.g., PLUS, MINUS)
+    CONDITION = "CONDITION" # IF-THEN logic
 
 # ============================================================
 # PHASE 1.2: Weighted & Colored Relationship Data Structure
@@ -323,7 +325,7 @@ class LetterVectors:
 class DNAConcept:
     def __init__(self, name: str, physical_features: List[int], semantic_features: List[int],
                  feature_registry: FeatureRegistry, letter_vec: LetterVectors,
-                 importance: float = 1.0, domain: str = "general"):
+                 importance: float = 1.0, domain: str = "general", numeric_value: Optional[float] = None):
         self.name = name
         self.physical_features = physical_features
         self.semantic_features = semantic_features
@@ -337,6 +339,9 @@ class DNAConcept:
         
         # PHASE 4.3: Pending updates for batch processing
         self.pending_deltas: List[np.ndarray] = []
+        
+        # INSTRUCTION DNA: numeric value for arithmetic
+        self.numeric_value = numeric_value
         
         self.vector: Optional[np.ndarray] = None
         self._update_vector()
@@ -399,7 +404,9 @@ class DNAConcept:
             "LOCATION": 0.7,
             "CAUSES": 1.0,
             "PART_OF": 0.85,
-            "RELATED": 0.5
+            "RELATED": 0.5,
+            "OPERATOR": 1.5,    # Strong pull for instruction operators
+            "CONDITION": 1.3
         }
         color_mult = color_multipliers.get(color, 0.5)
         pull_force *= color_mult
@@ -439,7 +446,9 @@ class DNAConcept:
             "HAS": PriorityLayer.CLUSTER,
             "GROWN_IN": PriorityLayer.CLUSTER,
             "LOCATION": PriorityLayer.CLUSTER,
-            "RELATED": PriorityLayer.ATOMIC
+            "RELATED": PriorityLayer.ATOMIC,
+            "OPERATOR": PriorityLayer.UNIVERSAL,
+            "CONDITION": PriorityLayer.UNIVERSAL
         }
         layer = layer_map.get(color, PriorityLayer.CLUSTER)
         
@@ -497,7 +506,8 @@ class DNAConcept:
             "vector": self.vector.tolist() if self.vector is not None else None,
             "importance": self.importance,
             "domain": self.domain,
-            "cluster_id": self.cluster_id
+            "cluster_id": self.cluster_id,
+            "numeric_value": self.numeric_value
         }
 
     @classmethod
@@ -509,7 +519,8 @@ class DNAConcept:
             feature_registry, 
             letter_vec,
             importance=data.get("importance", 1.0),
-            domain=data.get("domain", "general")
+            domain=data.get("domain", "general"),
+            numeric_value=data.get("numeric_value")
         )
         if data.get("vector") is not None:
             obj.vector = np.array(data["vector"], dtype=np.float32)
@@ -610,12 +621,135 @@ class SentenceDecoder:
         return draft
 
 # ============================================================
-# Reasoning Engine — Enhanced with partitioned search
+# INSTRUCTION DNA ENGINE (New!)
+# ============================================================
+class InstructionEngine:
+    """Executes deterministic operations using DNA concepts."""
+    
+    def __init__(self, concept_memory: 'ConceptMemory', feature_registry: FeatureRegistry, letter_vec: LetterVectors):
+        self.memory = concept_memory
+        self.feature_registry = feature_registry
+        self.letter_vec = letter_vec
+        self._ensure_operators()
+    
+    def _ensure_operators(self):
+        """Pre-register arithmetic and logic operators."""
+        operators = {
+            "PLUS": {"domain": "operator", "importance": 10.0},
+            "MINUS": {"domain": "operator", "importance": 10.0},
+            "MULTIPLY": {"domain": "operator", "importance": 10.0},
+            "DIVIDE": {"domain": "operator", "importance": 10.0},
+            "EQUALS": {"domain": "operator", "importance": 10.0},
+            "GREATER": {"domain": "operator", "importance": 10.0},
+            "LESS": {"domain": "operator", "importance": 10.0},
+            "IF": {"domain": "logic", "importance": 10.0},
+            "THEN": {"domain": "logic", "importance": 10.0},
+            "AND": {"domain": "logic", "importance": 10.0},
+            "OR": {"domain": "logic", "importance": 10.0},
+            "NOT": {"domain": "logic", "importance": 10.0},
+        }
+        for op, props in operators.items():
+            op_low = op.lower()
+            if op_low not in self.memory.concepts:
+                physical = [self.feature_registry.register(op_low)]
+                semantic = [self.feature_registry.register(op_low)]
+                self.memory.register(op_low, physical, semantic, 
+                                     importance=props["importance"], 
+                                     domain=props["domain"])
+    
+    def get_or_create_number(self, value: float) -> DNAConcept:
+        """Create a concept for a numeric value if it doesn't exist."""
+        name = f"num_{value}".replace('.', '_').replace('-', 'neg')
+        if name in self.memory.concepts:
+            return self.memory.concepts[name]
+        physical = [self.feature_registry.register(str(value))]
+        semantic = [self.feature_registry.register(str(value))]
+        concept = self.memory.register(name, physical, semantic, 
+                                       importance=abs(value)/10 + 1.0, 
+                                       domain="number",
+                                       numeric_value=value)
+        return concept
+    
+    def execute_arithmetic(self, operator: str, a: Union[str, float], b: Union[str, float]) -> DNAConcept:
+        """Perform arithmetic and return result concept."""
+        # Convert to concepts
+        if isinstance(a, (int, float)):
+            concept_a = self.get_or_create_number(float(a))
+        else:
+            concept_a = self.memory.concepts.get(a.lower())
+            if concept_a is None:
+                raise ValueError(f"Concept '{a}' not found")
+        
+        if isinstance(b, (int, float)):
+            concept_b = self.get_or_create_number(float(b))
+        else:
+            concept_b = self.memory.concepts.get(b.lower())
+            if concept_b is None:
+                raise ValueError(f"Concept '{b}' not found")
+        
+        val_a = concept_a.numeric_value if concept_a.numeric_value is not None else concept_a.importance
+        val_b = concept_b.numeric_value if concept_b.numeric_value is not None else concept_b.importance
+        
+        op_upper = operator.upper()
+        if op_upper == "PLUS":
+            result_val = val_a + val_b
+        elif op_upper == "MINUS":
+            result_val = val_a - val_b
+        elif op_upper == "MULTIPLY":
+            result_val = val_a * val_b
+        elif op_upper == "DIVIDE":
+            result_val = val_a / val_b if val_b != 0 else float('inf')
+        else:
+            raise ValueError(f"Unknown operator: {operator}")
+        
+        result_concept = self.get_or_create_number(result_val)
+        
+        # Create OPERATOR relationships
+        self.memory.add_weighted_relationship(concept_a.name, concept_b.name, weight=0.9, color="OPERATOR")
+        self.memory.add_weighted_relationship(operator.lower(), result_concept.name, weight=1.0, color="OPERATOR")
+        
+        return result_concept
+    
+    def evaluate_condition(self, condition_expr: Dict) -> bool:
+        """Evaluate a logic condition (IF part)."""
+        op = condition_expr.get("operator", "EQUALS").upper()
+        left = condition_expr.get("left")
+        right = condition_expr.get("right")
+        
+        if isinstance(left, str):
+            left_conc = self.memory.concepts.get(left.lower())
+            left_val = left_conc.numeric_value if left_conc and left_conc.numeric_value is not None else (left_conc.importance if left_conc else 0)
+        else:
+            left_val = float(left)
+            
+        if isinstance(right, str):
+            right_conc = self.memory.concepts.get(right.lower())
+            right_val = right_conc.numeric_value if right_conc and right_conc.numeric_value is not None else (right_conc.importance if right_conc else 0)
+        else:
+            right_val = float(right)
+        
+        if op == "EQUALS":
+            return abs(left_val - right_val) < 1e-6
+        elif op == "GREATER":
+            return left_val > right_val
+        elif op == "LESS":
+            return left_val < right_val
+        elif op == "AND":
+            return bool(left_val) and bool(right_val)
+        elif op == "OR":
+            return bool(left_val) or bool(right_val)
+        elif op == "NOT":
+            return not bool(left_val)
+        return False
+
+# ============================================================
+# Reasoning Engine — Enhanced with Instruction DNA
 # ============================================================
 class ReasoningEngine:
-    def __init__(self, concept_memory: 'ConceptMemory'):
+    def __init__(self, concept_memory: 'ConceptMemory', feature_registry: FeatureRegistry, letter_vec: LetterVectors):
         self.concept_memory = concept_memory
         self.decoder = SentenceDecoder(concept_memory)
+        self.instruction_engine = InstructionEngine(concept_memory, feature_registry, letter_vec)
 
     def multi_hop_reasoning(self, start: str, max_hops: int = 3, decay: float = 0.7,
                             color_filter: Optional[str] = None) -> Dict[str, float]:
@@ -676,6 +810,38 @@ class ReasoningEngine:
     def generate_sentence(self, concept: str) -> str:
         """Generate a descriptive sentence for a concept."""
         return self.decoder.generate_description(concept)
+    
+    # New instruction methods
+    def calculate(self, expression: str) -> Dict:
+        """Evaluate arithmetic expression using Instruction DNA."""
+        import re
+        allowed = set('0123456789.+-*/() ')
+        if not all(c in allowed for c in expression):
+            return {"error": "Invalid characters in expression"}
+        try:
+            result = eval(expression)
+            concept = self.instruction_engine.get_or_create_number(result)
+            return {"expression": expression, "result": result, "concept": concept.name}
+        except Exception as e:
+            return {"error": str(e)}
+    
+    def execute_instruction(self, operator: str, a: Union[str, float], b: Union[str, float]) -> Dict:
+        """Execute a single arithmetic operation."""
+        try:
+            result_concept = self.instruction_engine.execute_arithmetic(operator, a, b)
+            return {
+                "operator": operator,
+                "operands": [a, b],
+                "result": result_concept.numeric_value,
+                "concept": result_concept.name
+            }
+        except Exception as e:
+            return {"error": str(e)}
+    
+    def evaluate_rule(self, condition: Dict, action: str) -> Dict:
+        """IF-THEN rule evaluation."""
+        cond_result = self.instruction_engine.evaluate_condition(condition)
+        return {"condition_true": cond_result, "action_triggered": action if cond_result else None}
 
 # ============================================================
 # Concept Memory — PHASE 1-4: All Upgrades
@@ -781,7 +947,7 @@ class ConceptMemory:
         self.update_global_centroid()
 
     def register(self, name: str, physical_features: List[int], semantic_features: List[int],
-                 importance: float = 1.0, domain: str = "general") -> DNAConcept:
+                 importance: float = 1.0, domain: str = "general", numeric_value: Optional[float] = None) -> DNAConcept:
         name_low = name.lower()
         if name_low in self.concepts:
             # PHASE 10.2: Strengthen on re-registration
@@ -790,7 +956,7 @@ class ConceptMemory:
         
         concept = DNAConcept(name_low, physical_features, semantic_features,
                              self.feature_registry, self.letter_vec,
-                             importance=importance, domain=domain)
+                             importance=importance, domain=domain, numeric_value=numeric_value)
         self.concepts[name_low] = concept
         
         if self._faiss_available and concept.vector is not None:
@@ -1143,7 +1309,7 @@ class ContinuousTrainer:
 class KnowledgeGraphEnv:
     def __init__(self, start_trainer: bool = True):
         self.concept_memory, self.feature_registry, self.letter_vec, self.ontology = PersistenceManager.load_all()
-        self.reasoning_engine = ReasoningEngine(self.concept_memory)
+        self.reasoning_engine = ReasoningEngine(self.concept_memory, self.feature_registry, self.letter_vec)
         self._seed_initial_concepts()
         self.trainer: Optional[ContinuousTrainer] = None
         if start_trainer:
@@ -1216,6 +1382,16 @@ class KnowledgeGraphEnv:
             return []
         vec = self.concept_memory.concepts[concept].vector
         return self.concept_memory.partitioned_search(vec, top_k, partition=IDENTITY_DIMS)
+
+    # ========== INSTRUCTION DNA METHODS ==========
+    def calculate(self, expression: str) -> Dict:
+        return self.reasoning_engine.calculate(expression)
+    
+    def execute_instruction(self, operator: str, a: Union[str, float], b: Union[str, float]) -> Dict:
+        return self.reasoning_engine.execute_instruction(operator, a, b)
+    
+    def evaluate_rule(self, condition: Dict, action: str) -> Dict:
+        return self.reasoning_engine.evaluate_rule(condition, action)
 
     # OpenEnv interface
     def reset(self) -> str:
@@ -1355,7 +1531,7 @@ class KnowledgeGraphEnv:
         PersistenceManager.save_all(self.concept_memory, self.feature_registry, self.letter_vec)
 
 # ============================================================
-# FastAPI — with new endpoints for upgraded features
+# FastAPI — with ALL existing endpoints PLUS new Instruction endpoints
 # ============================================================
 
 _api_env: Optional[KnowledgeGraphEnv] = None
@@ -1384,8 +1560,8 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="Knowledge Graph Environment",
-    description="Self-evolving DNA-inspired knowledge graph with weighted relationships, dimensional partitioning, and global context awareness.",
-    version="2.0.0",
+    description="Self-evolving DNA-inspired knowledge graph with weighted relationships, dimensional partitioning, global context awareness, and Instruction DNA for arithmetic/logic.",
+    version="3.0.0",
     lifespan=lifespan,
 )
 
@@ -1417,7 +1593,7 @@ class GradeRequest(BaseModel):
 class GradeResponse(BaseModel):
     score: float
 
-# New models for upgraded features
+# Existing models for upgraded features
 class SentenceRequest(BaseModel):
     concept: str
 
@@ -1449,8 +1625,21 @@ class AddRelationshipRequest(BaseModel):
 class AddRelationshipResponse(BaseModel):
     status: str
 
+# New models for Instruction DNA
+class CalculateRequest(BaseModel):
+    expression: str
 
-# ── Endpoints ────────────────────────────────────────────────
+class InstructionRequest(BaseModel):
+    operator: str
+    a: Union[str, float]
+    b: Union[str, float]
+
+class RuleRequest(BaseModel):
+    condition: Dict
+    action: str
+
+
+# ── Existing Endpoints (UNCHANGED) ────────────────────────────────
 
 @app.get("/ping")
 async def ping():
@@ -1507,7 +1696,7 @@ async def state_endpoint():
     return StateResponse(state=_api_env.state())
 
 
-# ========== NEW ENDPOINTS FOR UPGRADED FEATURES ==========
+# ========== PREVIOUS UPGRADED ENDPOINTS ==========
 
 @app.post("/sentence", response_model=SentenceResponse)
 async def generate_sentence_endpoint(req: SentenceRequest):
@@ -1598,14 +1787,43 @@ async def list_concepts_endpoint(limit: int = 100):
     return {"concepts": concepts, "total": len(_api_env.concept_memory.concepts)}
 
 
+# ========== NEW INSTRUCTION DNA ENDPOINTS ==========
+
+@app.post("/calculate")
+async def calculate_endpoint(req: CalculateRequest):
+    """Execute arithmetic expression using Instruction DNA."""
+    if _api_env is None:
+        raise HTTPException(status_code=503, detail="Environment still initializing.")
+    return _api_env.calculate(req.expression)
+
+
+@app.post("/instruction/execute")
+async def execute_instruction_endpoint(req: InstructionRequest):
+    """Execute a single arithmetic operation."""
+    if _api_env is None:
+        raise HTTPException(status_code=503, detail="Environment still initializing.")
+    return _api_env.execute_instruction(req.operator, req.a, req.b)
+
+
+@app.post("/evaluate")
+async def evaluate_rule_endpoint(req: RuleRequest):
+    """Evaluate an IF-THEN rule."""
+    if _api_env is None:
+        raise HTTPException(status_code=503, detail="Environment still initializing.")
+    return _api_env.evaluate_rule(req.condition, req.action)
+
+
 @app.get("/")
 async def root():
     return {
         "name": "Knowledge Graph Environment",
-        "version": "2.0.0",
+        "version": "3.0.0",
         "status": "online" if _api_env else "initializing",
-        "message": "Welcome to the OpenEnv API with weighted relationships, dimensional partitioning, and sentence generation.",
-        "new_endpoints": [
+        "message": "DNA model with Instruction Logic (arithmetic, IF-THEN rules).",
+        "endpoints": [
+            "POST /calculate - Evaluate math expression",
+            "POST /instruction/execute - Run single arithmetic op",
+            "POST /evaluate - Evaluate condition-action rules",
             "POST /sentence - Generate description for a concept",
             "GET /global-context - Get global knowledge graph statistics",
             "POST /search/essence - Search by essence dimensions",
