@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "knowledge_graph_env"
+version = "1.0.0"
+description = "OpenEnv environment for customer support reasoning"
+authors = [{name = "OutstandingOm"}]
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy",
+    "faiss-cpu",
+    "fastapi",
+    "uvicorn",
+    "httpx",
+    "pydantic",
+    "openai",
+    "openenv-core>=0.2.0",
+]
+
+[project.scripts]
+server = "server.app:main"
+inference = "inference:main"
+
+[tool.setuptools]
+packages = ["server"]
+py-modules = ["knowledge_graph_env", "inference"]
