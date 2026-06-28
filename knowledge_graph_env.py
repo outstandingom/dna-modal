@@ -24,7 +24,7 @@ from graders import task_easy, task_medium, task_hard, TASKS, GRADERS
 # ============================================================
 # Configuration
 # ============================================================
-DIMS = 16
+DIMS = 128
 ALPHABET = [chr(ord('A') + i) for i in range(26)]
 POSITION_OFFSET = 0.1
 
