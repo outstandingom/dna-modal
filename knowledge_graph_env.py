@@ -204,7 +204,8 @@ class DynamicOntology:
 # Feature Registry (Enhanced)
 # ============================================================
 class FeatureRegistry:
-    def __init__(self, ontology: DynamicOntology):
+    def __init__(self, ontology: DynamicOntology, dims: int = 128):
+        self.dims = dims
         self.ontology = ontology
         self.feature_to_id: Dict[str, int] = {}
         self.id_to_feature: Dict[int, str] = {}
@@ -228,7 +229,7 @@ class FeatureRegistry:
         self.next_id += 1
         self.feature_to_id[name] = fid
         self.id_to_feature[fid] = name
-        self.feature_vectors[fid] = np.random.uniform(-1, 1, DIMS).astype(np.float32)
+        self.feature_vectors[fid] = np.random.uniform(-1, 1, self.dims).astype(np.float32)
         self.feature_importance[fid] = importance
         return fid
 
@@ -281,8 +282,9 @@ class FeatureRegistry:
 # Letter Vectors (Enhanced with mass)
 # ============================================================
 class LetterVectors:
-    def __init__(self):
-        self.vec = {ch: np.random.uniform(-1, 1, DIMS).astype(np.float32) for ch in ALPHABET}
+    def __init__(self, dims: int = 128):
+        self.dims = dims
+        self.vec = {ch: np.random.uniform(-1, 1, self.dims).astype(np.float32) for ch in ALPHABET}
         self.letter_importance = {ch: 1.0 for ch in ALPHABET}  # PHASE 1.3
 
     def get(self, letter: str) -> np.ndarray:
@@ -326,7 +328,8 @@ class LetterVectors:
 class DNAConcept:
     def __init__(self, name: str, physical_features: List[int], semantic_features: List[int],
                  feature_registry: FeatureRegistry, letter_vec: LetterVectors,
-                 importance: float = 1.0, domain: str = "general", numeric_value: Optional[float] = None):
+                 importance: float = 1.0, domain: str = "general", numeric_value: Optional[float] = None, dims: int = 128):
+        self.dims = dims
         self.name = name
         self.physical_features = physical_features
         self.semantic_features = semantic_features
@@ -349,7 +352,7 @@ class DNAConcept:
 
     def _encode_feature(self, fid: int, start_pos: int) -> np.ndarray:
         letters = self.feature_registry.feature_to_letters(fid, length=5)
-        vec = np.zeros(DIMS, dtype=np.float32)
+        vec = np.zeros(self.dims, dtype=np.float32)
         for i, ch in enumerate(letters):
             base = self.letter_vec.get(ch)
             # PHASE 1.3: Weight by letter importance
@@ -358,7 +361,7 @@ class DNAConcept:
         return vec
 
     def _update_vector(self):
-        vec = np.zeros(DIMS, dtype=np.float32)
+        vec = np.zeros(self.dims, dtype=np.float32)
         pos = 0
         for fid in self.physical_features:
             vec += self._encode_feature(fid, pos)
@@ -467,7 +470,7 @@ class DNAConcept:
                     identity_grad = grad_sin[IDENTITY_DIMS]
                     temporal_grad = grad_sin[TEMPORAL_DIMS]
                     
-                    full_grad = np.zeros(DIMS)
+                    full_grad = np.zeros(self.dims)
                     full_grad[ESSENCE_DIMS] = essence_grad * LR_DOMAIN
                     full_grad[IDENTITY_DIMS] = identity_grad * LR_CLUSTER
                     full_grad[TEMPORAL_DIMS] = temporal_grad * LR_ATOMIC
@@ -512,7 +515,7 @@ class DNAConcept:
         }
 
     @classmethod
-    def from_serialized(cls, data: dict, feature_registry, letter_vec):
+    def from_serialized(cls, data: dict, feature_registry, letter_vec, dims: int = 128):
         obj = cls(
             data["name"], 
             data["physical_features"], 
@@ -521,7 +524,8 @@ class DNAConcept:
             letter_vec,
             importance=data.get("importance", 1.0),
             domain=data.get("domain", "general"),
-            numeric_value=data.get("numeric_value")
+            numeric_value=data.get("numeric_value"),
+            dims=dims
         )
         if data.get("vector") is not None:
             obj.vector = np.array(data["vector"], dtype=np.float32)
@@ -751,11 +755,15 @@ class ReasoningEngine:
         self.concept_memory = concept_memory
         self.decoder = SentenceDecoder(concept_memory)
         self.instruction_engine = InstructionEngine(concept_memory, feature_registry, letter_vec)
+        self.predictive_fallback = None
 
     def multi_hop_reasoning(self, start: str, max_hops: int = 3, decay: float = 0.7,
                             color_filter: Optional[str] = None) -> Dict[str, float]:
         """PHASE 7.2: Color-filtered multi-hop reasoning."""
         if start not in self.concept_memory.weighted_relationships:
+            if self.predictive_fallback is not None:
+                print(f"[PREDICTIVE FALLBACK] Falling back to 12-dim predictive submodel for: {start}", flush=True)
+                return self.predictive_fallback.multi_hop_reasoning(start, max_hops, decay, color_filter)
             return {}
         
         activation = {start: 1.0}
@@ -849,7 +857,8 @@ class ReasoningEngine:
 # ============================================================
 class ConceptMemory:
     def __init__(self, feature_registry: FeatureRegistry, letter_vec: LetterVectors,
-                 max_concepts: int = MAX_CONCEPTS):
+                 max_concepts: int = MAX_CONCEPTS, dims: int = 128):
+        self.dims = dims
         self.feature_registry = feature_registry
         self.letter_vec = letter_vec
         self.concepts: Dict[str, DNAConcept] = {}
@@ -927,7 +936,7 @@ class ConceptMemory:
             return
         if self.index is None:
             import faiss
-            self.index = faiss.IndexFlatIP(DIMS)
+            self.index = faiss.IndexFlatIP(self.dims)
 
     def _rebuild_index(self):
         if not self._faiss_available or not self.concepts:
@@ -938,7 +947,7 @@ class ConceptMemory:
         if not vectors:
             return
         vecs = np.vstack(vectors).astype(np.float32)
-        self.index = faiss.IndexFlatIP(DIMS)
+        self.index = faiss.IndexFlatIP(self.dims)
         self.index.add(vecs)
         self.id_to_name = {i: n for i, n in enumerate(names)}
         self.name_to_id = {n: i for i, n in enumerate(names)}
@@ -957,7 +966,7 @@ class ConceptMemory:
         
         concept = DNAConcept(name_low, physical_features, semantic_features,
                              self.feature_registry, self.letter_vec,
-                             importance=importance, domain=domain, numeric_value=numeric_value)
+                             importance=importance, domain=domain, numeric_value=numeric_value, dims=self.dims)
         self.concepts[name_low] = concept
         
         if self._faiss_available and concept.vector is not None:
@@ -1190,7 +1199,7 @@ class ConceptMemory:
         self.relationships = defaultdict(set)
         
         for name, cdata in data.get("concepts", {}).items():
-            self.concepts[name] = DNAConcept.from_serialized(cdata, self.feature_registry, self.letter_vec)
+            self.concepts[name] = DNAConcept.from_serialized(cdata, self.feature_registry, self.letter_vec, dims=self.dims)
         
         for k, vdict in data.get("weighted_relationships", {}).items():
             for b, rdata in vdict.items():
@@ -1230,9 +1239,9 @@ class PersistenceManager:
             filepath = os.path.join(PERSIST_DIR, "brain_state.pkl")
         
         ontology = DynamicOntology()
-        feature_registry = FeatureRegistry(ontology)
-        letter_vec = LetterVectors()
-        concept_memory = ConceptMemory(feature_registry, letter_vec)
+        feature_registry = FeatureRegistry(ontology, dims=128)
+        letter_vec = LetterVectors(dims=128)
+        concept_memory = ConceptMemory(feature_registry, letter_vec, dims=128)
         
         if os.path.exists(filepath):
             try:
@@ -1311,6 +1320,14 @@ class KnowledgeGraphEnv:
     def __init__(self, start_trainer: bool = True):
         self.concept_memory, self.feature_registry, self.letter_vec, self.ontology = PersistenceManager.load_all()
         self.reasoning_engine = ReasoningEngine(self.concept_memory, self.feature_registry, self.letter_vec)
+        
+        # Predictive Submodel setup (12-dim)
+        self.predictive_feature_registry = FeatureRegistry(self.ontology, dims=12)
+        self.predictive_letter_vec = LetterVectors(dims=12)
+        self.predictive_concept_memory = ConceptMemory(self.predictive_feature_registry, self.predictive_letter_vec, dims=12)
+        self.predictive_reasoning = ReasoningEngine(self.predictive_concept_memory, self.predictive_feature_registry, self.predictive_letter_vec)
+        self.reasoning_engine.predictive_fallback = self.predictive_reasoning
+        
         self._seed_initial_concepts()
         self.trainer: Optional[ContinuousTrainer] = None
         if start_trainer:
@@ -1340,6 +1357,11 @@ class KnowledgeGraphEnv:
             semantic_fids = [self.feature_registry.register(f) for f in features]
             self.concept_memory.register(concept, physical_fids, semantic_fids, 
                                           importance=importance, domain=domain)
+            
+            # Sync to predictive 12-dim submodel
+            p_phys_fids = [self.predictive_feature_registry.register(f) for f in features]
+            p_sem_fids = [self.predictive_feature_registry.register(f) for f in features]
+            self.predictive_concept_memory.register(concept, p_phys_fids, p_sem_fids, importance=importance, domain=domain)
         
         # Add colored relationships
         self.concept_memory.add_weighted_relationship("login issue", "account locked", weight=0.9, color="CAUSES")
@@ -1348,6 +1370,14 @@ class KnowledgeGraphEnv:
         self.concept_memory.add_weighted_relationship("feature request", "enhancement", weight=0.9, color="IS_A")
         self.concept_memory.add_weighted_relationship("login issue", "authentication", weight=0.95, color="IS_A")
         self.concept_memory.add_weighted_relationship("account locked", "security", weight=0.85, color="HAS")
+        
+        # Sync relationships to predictive model
+        self.predictive_concept_memory.add_weighted_relationship("login issue", "account locked", weight=0.9, color="CAUSES")
+        self.predictive_concept_memory.add_weighted_relationship("billing", "refund", weight=0.8, color="RELATED")
+        self.predictive_concept_memory.add_weighted_relationship("slow performance", "crash", weight=0.7, color="CAUSES")
+        self.predictive_concept_memory.add_weighted_relationship("feature request", "enhancement", weight=0.9, color="IS_A")
+        self.predictive_concept_memory.add_weighted_relationship("login issue", "authentication", weight=0.95, color="IS_A")
+        self.predictive_concept_memory.add_weighted_relationship("account locked", "security", weight=0.85, color="HAS")
 
     # Instance methods (delegate to imported graders)
     def task_easy(self, input_text: str) -> float:
@@ -1405,9 +1435,15 @@ class KnowledgeGraphEnv:
             if loop.is_running():
                 asyncio.create_task(
                     self.concept_memory.extract_and_link(self.current_task["input"], self.ontology))
+                asyncio.create_task(
+                    self.predictive_concept_memory.extract_and_link(self.current_task["input"], self.ontology)
+                )
             else:
                 loop.run_until_complete(
                     self.concept_memory.extract_and_link(self.current_task["input"], self.ontology))
+                asyncio.create_task(
+                    self.predictive_concept_memory.extract_and_link(self.current_task["input"], self.ontology)
+                )
         except Exception as e:
             print(f"[DEBUG] Background extraction failed: {e}", flush=True)
         return self.current_task["input"]
@@ -1833,3 +1869,12 @@ async def root():
             "GET /concepts - List all concepts"
         ]
     }
+
+@app.get("/predict")
+def predict_fuzzy(concept: str):
+    if not _env_ready or _api_env is None:
+        raise HTTPException(status_code=503, detail="Environment not ready")
+    
+    # Force use of predictive model
+    res = _api_env.predictive_reasoning.multi_hop_reasoning(concept.lower(), max_hops=2)
+    return {"fuzzy_predictions": res}
