@@ -11,8 +11,10 @@ from contextlib import asynccontextmanager
 from typing import Dict, List, Tuple, Optional, Set, Any, Union
 from dataclasses import dataclass, field
 from enum import Enum
+from dotenv import load_dotenv
 
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import openai
 
@@ -63,6 +65,7 @@ GLOBAL_UPDATE_FREQUENCY = 10  # Update centroid every N batches
 
 os.makedirs(PERSIST_DIR, exist_ok=True)
 
+load_dotenv()
 USE_VALIDATOR_PROXY = os.environ.get("API_BASE_URL") is not None
 if USE_VALIDATOR_PROXY:
     API_BASE_URL = os.environ["API_BASE_URL"]
@@ -74,7 +77,7 @@ else:
     API_KEY = os.getenv("HF_TOKEN", "")
     openai_client = openai.OpenAI(base_url=API_BASE_URL, api_key=API_KEY) if API_KEY else None
 
-MODEL_NAME = os.getenv("MODEL_NAME", "Qwen/Qwen2.5-72B-Instruct")
+MODEL_NAME = os.getenv("MODEL_NAME", "zai-org/GLM-5.2")
 
 STOP_WORDS = {
     "the", "and", "for", "are", "but", "not", "you", "all", "can", "had",
@@ -1600,6 +1603,14 @@ app = FastAPI(
     description="Self-evolving DNA-inspired knowledge graph with weighted relationships, dimensional partitioning, global context awareness, and Instruction DNA for arithmetic/logic.",
     version="3.0.0",
     lifespan=lifespan,
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://growhaz.com", "https://growhaz.com", "http://growhaz.in", "https://growhaz.in"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 

@@ -9,13 +9,16 @@ IMPORTANT: All scores MUST be strictly between 0 and 1 (exclusive).
 """
 
 import os
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # ── LLM client (lazy-initialised) ─────────────────────────────────────────────
 _client = None
 
 API_BASE_URL = os.getenv("API_BASE_URL", "https://router.huggingface.co/v1")
 API_KEY = os.getenv("HF_TOKEN", "")
-MODEL_NAME = os.getenv("MODEL_NAME", "Qwen/Qwen2.5-72B-Instruct")
+MODEL_NAME = os.getenv("MODEL_NAME", "zai-org/GLM-5.2")
 
 
 def _get_client():
