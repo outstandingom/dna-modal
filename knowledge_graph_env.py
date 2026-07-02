@@ -79,6 +79,55 @@ else:
 
 MODEL_NAME = os.getenv("MODEL_NAME", "zai-org/GLM-5.2")
 
+# ============================================================
+# BYOK: Multi-Provider Registry
+# All providers use OpenAI-compatible API format.
+# ============================================================
+PROVIDER_REGISTRY = {
+    "groq": {
+        "name": "Groq",
+        "base_url": "https://api.groq.com/openai/v1",
+        "default_model": "llama-3.3-70b-versatile",
+        "free_tier": True,
+        "get_key_url": "https://console.groq.com/keys"
+    },
+    "gemini": {
+        "name": "Google Gemini",
+        "base_url": "https://generativelanguage.googleapis.com/v1beta/openai",
+        "default_model": "gemini-2.0-flash",
+        "free_tier": True,
+        "get_key_url": "https://aistudio.google.com/apikey"
+    },
+    "openai": {
+        "name": "OpenAI",
+        "base_url": "https://api.openai.com/v1",
+        "default_model": "gpt-4o-mini",
+        "free_tier": False,
+        "get_key_url": "https://platform.openai.com/api-keys"
+    },
+    "deepseek": {
+        "name": "DeepSeek",
+        "base_url": "https://api.deepseek.com/v1",
+        "default_model": "deepseek-chat",
+        "free_tier": True,
+        "get_key_url": "https://platform.deepseek.com/api_keys"
+    },
+    "huggingface": {
+        "name": "Hugging Face",
+        "base_url": "https://router.huggingface.co/v1",
+        "default_model": "Qwen/Qwen2.5-72B-Instruct",
+        "free_tier": True,
+        "get_key_url": "https://huggingface.co/settings/tokens"
+    },
+    "custom": {
+        "name": "Custom / Self-Hosted",
+        "base_url": "",
+        "default_model": "",
+        "free_tier": None,
+        "get_key_url": ""
+    }
+}
+
 STOP_WORDS = {
     "the", "and", "for", "are", "but", "not", "you", "all", "can", "had",
     "her", "was", "one", "our", "out", "has", "have", "from", "they", "been",
@@ -1900,20 +1949,73 @@ def predict_fuzzy(concept: str):
 class AgentRequest(BaseModel):
     message: str
     session_id: Optional[str] = None
+    provider: Optional[str] = None      # "groq", "gemini", "openai", etc.
+    api_key: Optional[str] = None       # User's own API key
+    model: Optional[str] = None         # Override model name
+    custom_base_url: Optional[str] = None  # Only for "custom" provider
 
 class AgentResponse(BaseModel):
     response: str
     tool_calls: list
+    provider_used: Optional[str] = None
+
+@app.get("/providers")
+async def list_providers():
+    """Return the list of supported LLM providers for the frontend settings panel."""
+    providers = []
+    for key, info in PROVIDER_REGISTRY.items():
+        providers.append({
+            "id": key,
+            "name": info["name"],
+            "default_model": info["default_model"],
+            "free_tier": info["free_tier"],
+            "get_key_url": info["get_key_url"],
+            "requires_base_url": key == "custom"
+        })
+    return {"providers": providers}
+
+
+def _build_client(req: AgentRequest):
+    """Build an OpenAI-compatible client from the user's BYOK request.
+    Falls back to the global openai_client if no provider is specified."""
+    if req.provider and req.api_key:
+        provider_info = PROVIDER_REGISTRY.get(req.provider)
+        if not provider_info:
+            raise HTTPException(status_code=400, detail=f"Unknown provider: {req.provider}. Use /providers to see supported options.")
+        
+        base_url = req.custom_base_url if req.provider == "custom" else provider_info["base_url"]
+        if not base_url:
+            raise HTTPException(status_code=400, detail="Custom provider requires a base_url.")
+        
+        model = req.model or provider_info["default_model"]
+        
+        # Safeguard: Auto-upgrade decommissioned Groq model from old frontend cache
+        if req.provider == "groq" and model == "llama-3.1-70b-versatile":
+            model = "llama-3.3-70b-versatile"
+            
+        client = openai.OpenAI(base_url=base_url, api_key=req.api_key)
+        return client, model, req.provider
+    
+    # Fallback to global .env configuration
+    if openai_client:
+        return openai_client, MODEL_NAME, "default"
+    
+    raise HTTPException(status_code=503, detail="No LLM configured. Please provide a provider and API key, or configure one in the server .env file.")
+
 
 @app.post("/agent", response_model=AgentResponse)
 async def agent_endpoint(req: AgentRequest):
     """Autonomous agent endpoint that uses LLM tool calling to interact with the graph.
     If session_id is provided, all graph concepts are namespaced by that ID so each user
-    has a completely isolated memory within the shared graph database."""
+    has a completely isolated memory within the shared graph database.
+    
+    BYOK: If provider and api_key are provided, creates a per-request LLM client.
+    Otherwise falls back to the server's default .env configuration."""
     if not _env_ready or _api_env is None:
         raise HTTPException(status_code=503, detail="Environment not ready")
-    if not openai_client:
-        raise HTTPException(status_code=503, detail="OpenAI client not configured (HF_TOKEN missing).")
+    
+    # BYOK: Build client from user's provider/key or fall back to global
+    client, model_name, provider_used = _build_client(req)
 
     # Build namespace prefix from session_id (e.g. "user_abc123:")
     ns = f"user_{req.session_id[:8]}:" if req.session_id else ""
@@ -1963,8 +2065,8 @@ async def agent_endpoint(req: AgentRequest):
 
     import json
     try:
-        response = openai_client.chat.completions.create(
-            model=MODEL_NAME,
+        response = client.chat.completions.create(
+            model=model_name,
             messages=messages,
             tools=tools,
             tool_choice="auto"
@@ -2011,12 +2113,12 @@ async def agent_endpoint(req: AgentRequest):
             )
             
         try:
-            final_response = openai_client.chat.completions.create(
-                model=MODEL_NAME,
+            final_response = client.chat.completions.create(
+                model=model_name,
                 messages=messages
             )
-            return AgentResponse(response=final_response.choices[0].message.content, tool_calls=executed_tools)
+            return AgentResponse(response=final_response.choices[0].message.content, tool_calls=executed_tools, provider_used=provider_used)
         except Exception as e:
-            return AgentResponse(response=f"Graph updated, but final response generation failed: {e}", tool_calls=executed_tools)
+            return AgentResponse(response=f"Graph updated, but final response generation failed: {e}", tool_calls=executed_tools, provider_used=provider_used)
         
-    return AgentResponse(response=response_message.content or "No action taken.", tool_calls=[])
+    return AgentResponse(response=response_message.content or "No action taken.", tool_calls=[], provider_used=provider_used)
