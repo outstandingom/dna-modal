@@ -1889,3 +1889,115 @@ def predict_fuzzy(concept: str):
     # Force use of predictive model
     res = _api_env.predictive_reasoning.multi_hop_reasoning(concept.lower(), max_hops=2)
     return {"fuzzy_predictions": res}
+
+class AgentRequest(BaseModel):
+    message: str
+
+class AgentResponse(BaseModel):
+    response: str
+    tool_calls: list
+
+@app.post("/agent", response_model=AgentResponse)
+async def agent_endpoint(req: AgentRequest):
+    """Autonomous agent endpoint that uses LLM tool calling to interact with the graph."""
+    if not _env_ready or _api_env is None:
+        raise HTTPException(status_code=503, detail="Environment not ready")
+    if not openai_client:
+        raise HTTPException(status_code=503, detail="OpenAI client not configured (HF_TOKEN missing).")
+
+    tools = [
+        {
+            "type": "function",
+            "function": {
+                "name": "search_graph",
+                "description": "Searches the vector graph for a specific concept to find related concepts and resolutions.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "concept": {
+                            "type": "string",
+                            "description": "The concept to search for (e.g., 'login issue')"
+                        }
+                    },
+                    "required": ["concept"]
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "extract_and_learn",
+                "description": "Parses a block of text, extracts concepts, and permanently saves them to the graph memory.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "text": {
+                            "type": "string",
+                            "description": "The raw text or sentence to learn from."
+                        }
+                    },
+                    "required": ["text"]
+                }
+            }
+        }
+    ]
+
+    messages = [
+        {"role": "system", "content": "You are the autonomous controller of a Vector Knowledge Graph. Use the provided tools to fulfill the user's request. If the user asks a question, use search_graph. If the user wants you to learn something new, use extract_and_learn. After receiving tool results, provide a helpful summary."},
+        {"role": "user", "content": req.message}
+    ]
+
+    import json
+    try:
+        response = openai_client.chat.completions.create(
+            model=MODEL_NAME,
+            messages=messages,
+            tools=tools,
+            tool_choice="auto"
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"LLM Tool Calling Failed: {e}")
+
+    response_message = response.choices[0].message
+    tool_calls = response_message.tool_calls
+    executed_tools = []
+    
+    if tool_calls:
+        messages.append(response_message)
+        for tool_call in tool_calls:
+            function_name = tool_call.function.name
+            try:
+                function_args = json.loads(tool_call.function.arguments)
+            except:
+                function_args = {}
+            
+            tool_result = ""
+            if function_name == "search_graph":
+                res = _api_env.reasoning_engine.multi_hop_reasoning(function_args.get("concept", ""), max_hops=2)
+                tool_result = json.dumps(res)
+            elif function_name == "extract_and_learn":
+                res = await _api_env.concept_memory.extract_and_link(function_args.get("text", ""), _api_env.ontology)
+                tool_result = json.dumps(res)
+            else:
+                tool_result = "Tool not found"
+                
+            executed_tools.append({"tool": function_name, "result": tool_result})
+            messages.append(
+                {
+                    "tool_call_id": tool_call.id,
+                    "role": "tool",
+                    "name": function_name,
+                    "content": tool_result,
+                }
+            )
+            
+        try:
+            final_response = openai_client.chat.completions.create(
+                model=MODEL_NAME,
+                messages=messages
+            )
+            return AgentResponse(response=final_response.choices[0].message.content, tool_calls=executed_tools)
+        except Exception as e:
+            return AgentResponse(response=f"Graph updated, but final response generation failed: {e}", tool_calls=executed_tools)
+        
+    return AgentResponse(response=response_message.content or "No action taken.", tool_calls=[])
