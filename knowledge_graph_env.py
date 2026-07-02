@@ -2059,7 +2059,7 @@ async def agent_endpoint(req: AgentRequest):
     ]
 
     messages = [
-        {"role": "system", "content": "You are the autonomous controller of a Vector Knowledge Graph. Use the provided tools to fulfill the user's request. If the user asks a question, use search_graph. If the user wants you to learn something new, use extract_and_learn. After receiving tool results, provide a helpful summary."},
+        {"role": "system", "content": "You are the autonomous controller of a Vector Knowledge Graph. Use the provided tools to fulfill the user's request. If the user asks a question, use search_graph. If the user wants you to learn something new, use extract_and_learn. After receiving tool results, provide a helpful summary. CRITICAL: You must use standard native JSON tool calling. DO NOT output <function> or XML tags for tools."},
         {"role": "user", "content": req.message}
     ]
 
