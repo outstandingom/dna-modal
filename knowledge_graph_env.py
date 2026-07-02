@@ -1899,6 +1899,7 @@ def predict_fuzzy(concept: str):
 
 class AgentRequest(BaseModel):
     message: str
+    session_id: Optional[str] = None
 
 class AgentResponse(BaseModel):
     response: str
@@ -1906,11 +1907,17 @@ class AgentResponse(BaseModel):
 
 @app.post("/agent", response_model=AgentResponse)
 async def agent_endpoint(req: AgentRequest):
-    """Autonomous agent endpoint that uses LLM tool calling to interact with the graph."""
+    """Autonomous agent endpoint that uses LLM tool calling to interact with the graph.
+    If session_id is provided, all graph concepts are namespaced by that ID so each user
+    has a completely isolated memory within the shared graph database."""
     if not _env_ready or _api_env is None:
         raise HTTPException(status_code=503, detail="Environment not ready")
     if not openai_client:
         raise HTTPException(status_code=503, detail="OpenAI client not configured (HF_TOKEN missing).")
+
+    # Build namespace prefix from session_id (e.g. "user_abc123:")
+    ns = f"user_{req.session_id[:8]}:" if req.session_id else ""
+
 
     tools = [
         {
@@ -1980,10 +1987,15 @@ async def agent_endpoint(req: AgentRequest):
             
             tool_result = ""
             if function_name == "search_graph":
-                res = _api_env.reasoning_engine.multi_hop_reasoning(function_args.get("concept", ""), max_hops=2)
+                raw_concept = function_args.get("concept", "")
+                namespaced_concept = f"{ns}{raw_concept}" if ns else raw_concept
+                res = _api_env.reasoning_engine.multi_hop_reasoning(namespaced_concept, max_hops=2)
                 tool_result = json.dumps(res)
             elif function_name == "extract_and_learn":
-                res = await _api_env.concept_memory.extract_and_link(function_args.get("text", ""), _api_env.ontology)
+                raw_text = function_args.get("text", "")
+                # Prepend the namespace as context so all extracted concepts get the user prefix
+                namespaced_text = f"[{ns}] {raw_text}" if ns else raw_text
+                res = await _api_env.concept_memory.extract_and_link(namespaced_text, _api_env.ontology)
                 tool_result = json.dumps(res)
             else:
                 tool_result = "Tool not found"
