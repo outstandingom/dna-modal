@@ -6,7 +6,7 @@ import threading
 from typing import List, Dict, Optional
 
 # ───────────────────────────────────────────────────────────────────────
-# 1. FROZEN CORTEX
+# 1. FROZEN CORTEX (26 letters, 128 dims – NEVER changes)
 # ───────────────────────────────────────────────────────────────────────
 class DNACortex:
     def __init__(self):
@@ -23,7 +23,7 @@ class DNACortex:
         return self.embeddings[idxs]
 
 # ───────────────────────────────────────────────────────────────────────
-# 2. GLOBAL SYNAPSE (26x26)
+# 2. GLOBAL SYNAPSE (26x26) – updated by ALL users
 # ───────────────────────────────────────────────────────────────────────
 class GlobalSynapse:
     def __init__(self, persist_path: str = "dna_synapse.json"):
@@ -64,7 +64,7 @@ class GlobalSynapse:
                 self._save()
 
 # ───────────────────────────────────────────────────────────────────────
-# 3. DNA STRAND
+# 3. DNA STRAND – the hidden layer for a single task/response
 # ───────────────────────────────────────────────────────────────────────
 class DNAStrand:
     def __init__(self, initial_sequence: np.ndarray):
@@ -84,7 +84,7 @@ class DNAStrand:
         self.sequence = np.clip(self.sequence, -1.0, 1.0)
 
 # ───────────────────────────────────────────────────────────────────────
-# 4. MAIN DNA JUDGE ENGINE
+# 4. MAIN DNA JUDGE ENGINE – learns from every call
 # ───────────────────────────────────────────────────────────────────────
 class DNAJudgeEngine:
     def __init__(self):
@@ -96,6 +96,7 @@ class DNAJudgeEngine:
         self.user_cache = {}
         self.lock = threading.RLock()
 
+        # Task descriptions (exactly as in original graders.py)
         self.task_descriptions = {
             "task_easy": "The user cannot log in to their account. Their password is not working and they keep getting locked out.",
             "task_medium": "The user's bill shows a double charge for their subscription. They need a refund for the extra payment.",
@@ -118,7 +119,6 @@ class DNAJudgeEngine:
             if user_id not in self.user_cache:
                 delta = np.zeros(26, dtype=np.float32)
                 strand = self.cortex.get_dna_sequence("HELLOUSER")
-                # load from disk if exists...
                 os.makedirs("user_dnas", exist_ok=True)
                 strand_path = f"user_dnas/{user_id}_strand.npy"
                 delta_path = f"user_dnas/{user_id}_delta.npy"
@@ -142,50 +142,60 @@ class DNAJudgeEngine:
     def judge(self, user_id: str, agent_response: str, task_description: str) -> float:
         self.global_step += 1
 
+        # Encode task & response into DNA strands
         task_strand = DNAStrand(self.cortex.get_dna_sequence(task_description))
         resp_strand = DNAStrand(self.cortex.get_dna_sequence(agent_response))
 
-        # Letter probabilities from task
+        # Letter probabilities from the task concept
         task_concept = np.mean(task_strand.fire(), axis=0, keepdims=True)
         raw_act = self.cortex.embeddings @ task_concept.T
         raw_act = np.squeeze(raw_act)
         exp_act = np.exp(raw_act * 2.0)
         letter_probs = exp_act / (np.sum(exp_act) + 1e-8)
 
-        # Synapse influence
+        # Synapse influence (how the global grammar shapes this task)
         synapse_influence = float(letter_probs @ self.synapse.weights @ letter_probs.T)
 
-        # Similarity
+        # Similarity between task and response
         task_vec = np.mean(task_strand.fire(), axis=0, keepdims=True)
         resp_vec = np.mean(resp_strand.fire(), axis=0, keepdims=True)
         task_vec /= (np.linalg.norm(task_vec) + 1e-8)
         resp_vec /= (np.linalg.norm(resp_vec) + 1e-8)
         similarity = float(np.dot(task_vec, resp_vec.T)[0, 0])
 
-        # Final score
+        # Final score (weighted combination)
         raw_score = 0.65 * ((similarity + 1.0) / 2.0) + 0.35 * synapse_influence
         score = max(0.01, min(0.99, raw_score))
-        reward = score
+        reward = score   # the score is the reward signal
 
-        # === LEARNING ===
+        # ========== UPGRADE (learn from this interaction) ==========
+        # 1. Global Synapse (26x26) – sine‑Hebbian
         self.synapse.update(letter_probs, reward)
+
+        # 2. Task and response strands – hebbian updates
         task_strand.hebbian_update(reward, self.global_step, 0.03)
         resp_strand.hebbian_update(reward, self.global_step + 100, 0.04)
 
+        # 3. User delta (personal bias over the 26 letters)
         user_data = self._get_user_data(user_id)
         delta_lr = 0.06 * (0.5 + 0.5 * math.sin(self.global_step / 10.0))
         user_data["delta"] += delta_lr * (reward - 0.5) * 2.0 * letter_probs
         user_data["delta"] = np.clip(user_data["delta"], -0.4, 0.4)
 
-        # Global strand update (fixed padding)
+        # 4. Global strand (collective wisdom) – fixed padding
         if len(self.global_strand) != len(task_strand.sequence):
-            min_len = min(len(self.global_strand), len(task_strand.sequence))
-            self.global_strand = self.global_strand[:min_len]
+            # Trim or pad to match task length
+            if len(self.global_strand) < len(task_strand.sequence):
+                pad = np.zeros((len(task_strand.sequence) - len(self.global_strand), 128))
+                self.global_strand = np.vstack([self.global_strand, pad])
+            else:
+                self.global_strand = self.global_strand[:len(task_strand.sequence)]
 
         global_lr = 0.001 * (0.5 + 0.5 * math.sin(self.global_step / 50.0))
-        self.global_strand += global_lr * (reward - 0.5) * 2.0 * task_strand.sequence[:len(self.global_strand)]
+        self.global_strand += global_lr * (reward - 0.5) * 2.0 * task_strand.sequence
         self.global_strand = np.clip(self.global_strand, -1.0, 1.0)
 
+        # Persist every 5 steps
         if self.global_step % 5 == 0:
             self.synapse._save()
             self._save_global_strand()
@@ -194,7 +204,7 @@ class DNAJudgeEngine:
         return score
 
 # ───────────────────────────────────────────────────────────────────────
-# Singleton + Public API (exact same as original)
+# 5. SINGLETON & PUBLIC API (exact same signature as original graders.py)
 # ───────────────────────────────────────────────────────────────────────
 _engine = None
 _engine_lock = threading.Lock()
@@ -228,14 +238,31 @@ def _llm_judge(agent_response: str, task_description: str, keywords: list) -> fl
         print(f"[DNA Judge fallback] {e}")
         return _keyword_fallback(agent_response, keywords)
 
-# Task definitions (identical to original)
-TASK_DESCRIPTIONS = { ... }  # copy from your original
-TASK_KEYWORDS = { ... }
+# ── Task definitions (exactly as in your original file) ──────────
+TASK_DESCRIPTIONS = {
+    "task_easy": "The user cannot log in to their account. Their password is not working and they keep getting locked out.",
+    "task_medium": "The user's bill shows a double charge for their subscription. They need a refund for the extra payment.",
+    "task_hard": "The user's account is locked after multiple failed password attempts. They suspect a security breach.",
+}
+
+TASK_KEYWORDS = {
+    "task_easy":   ["login", "account", "password", "access", "sign in", "authentication", "credential", "reset"],
+    "task_medium": ["bill", "payment", "charge", "invoice", "refund", "subscription", "double", "overcharge"],
+    "task_hard":   ["locked", "security", "breach", "blocked", "verify", "critical", "password", "unauthorized"],
+}
 
 def task_easy(input_text: str) -> float:
     return _llm_judge(input_text, TASK_DESCRIPTIONS["task_easy"], TASK_KEYWORDS["task_easy"])
 
-# ... same for task_medium, task_hard
+def task_medium(input_text: str) -> float:
+    return _llm_judge(input_text, TASK_DESCRIPTIONS["task_medium"], TASK_KEYWORDS["task_medium"])
+
+def task_hard(input_text: str) -> float:
+    return _llm_judge(input_text, TASK_DESCRIPTIONS["task_hard"], TASK_KEYWORDS["task_hard"])
 
 TASKS = ["task_easy", "task_medium", "task_hard"]
-GRADERS = {"task_easy": task_easy, "task_medium": task_medium, "task_hard": task_hard}
+GRADERS = {
+    "task_easy": task_easy,
+    "task_medium": task_medium,
+    "task_hard": task_hard,
+        }
