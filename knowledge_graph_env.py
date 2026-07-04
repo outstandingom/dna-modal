@@ -22,6 +22,7 @@ import openai
 # GRADERS — imported from graders.py (LLM-as-a-Judge).
 # ============================================================
 from graders import task_easy, task_medium, task_hard, TASKS, GRADERS
+from skill_adapter import get_adapter
 
 # ============================================================
 # Configuration
@@ -2142,8 +2143,18 @@ async def agent_endpoint(req: AgentRequest):
         }
     ]
 
+    # Extract 12-dim vectors from predictive submodel
+    import numpy as np
+    seq = _api_env.predictive_letter_vec.get_dna_sequence(req.message)
+    user_embedding = np.mean(seq, axis=0) if seq.shape[0] > 0 else np.zeros(12)
+    memory_context = np.zeros(12)  # Default 0s for memory context
+    
+    # Get 12-dim skill vector from neural network adapter
+    skill_vector = get_adapter()(user_embedding, memory_context)
+    skill_vector_str = "[" + ", ".join([f"{x:.2f}" for x in skill_vector]) + "]"
+
     messages = [
-        {"role": "system", "content": "You are the autonomous controller of a Vector Knowledge Graph. Use the provided tools to fulfill the user's request. If the user asks a question, use search_graph. If the user wants you to learn something new, use extract_and_learn. After receiving tool results, provide a helpful summary. CRITICAL: You must use standard native JSON tool calling. DO NOT output <function> or XML tags for tools."},
+        {"role": "system", "content": f"You are the autonomous controller of a Vector Knowledge Graph. Use the provided tools to fulfill the user's request. If the user asks a question, use search_graph. If the user wants you to learn something new, use extract_and_learn. After receiving tool results, provide a helpful summary. CRITICAL: You must use standard native JSON tool calling. DO NOT output <function> or XML tags for tools. [SKILL_VECTOR]: Apply this neural skill vector constraint to your reasoning: {skill_vector_str}"},
         {"role": "user", "content": req.message}
     ]
 
@@ -2159,6 +2170,15 @@ async def agent_endpoint(req: AgentRequest):
         raise HTTPException(status_code=500, detail=f"LLM Tool Calling Failed: {e}")
 
     response_message = response.choices[0].message
+    
+    # POST-LLM REINFORCEMENT LEARNING PASS
+    try:
+        if response_message.content:
+            score = GRADERS["task_medium"](response_message.content)
+            get_adapter().update_from_reward(user_embedding, memory_context, score)
+    except Exception:
+        pass
+        
     tool_calls = response_message.tool_calls
     executed_tools = []
     

@@ -11,7 +11,7 @@ from typing import List, Dict, Optional
 class DNACortex:
     def __init__(self):
         rng = np.random.RandomState(42)
-        self.embeddings = rng.randn(26, 128).astype(np.float32)
+        self.embeddings = rng.randn(26, 12).astype(np.float32)
         self.embeddings /= np.linalg.norm(self.embeddings, axis=1, keepdims=True)
         self.letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
         self.map = {c: i for i, c in enumerate(self.letters)}
@@ -19,7 +19,7 @@ class DNACortex:
     def get_dna_sequence(self, text: str) -> np.ndarray:
         idxs = [self.map.get(c.upper(), 0) for c in text if c.isalpha()]
         if not idxs:
-            return np.zeros((1, 128))
+            return np.zeros((1, 12))
         return self.embeddings[idxs]
 
 # ───────────────────────────────────────────────────────────────────────
@@ -186,7 +186,7 @@ class DNAJudgeEngine:
         if len(self.global_strand) != len(task_strand.sequence):
             # Trim or pad to match task length
             if len(self.global_strand) < len(task_strand.sequence):
-                pad = np.zeros((len(task_strand.sequence) - len(self.global_strand), 128))
+                pad = np.zeros((len(task_strand.sequence) - len(self.global_strand), 12))
                 self.global_strand = np.vstack([self.global_strand, pad])
             else:
                 self.global_strand = self.global_strand[:len(task_strand.sequence)]

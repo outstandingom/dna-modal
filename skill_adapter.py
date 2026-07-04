@@ -3,14 +3,14 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from typing import List, Tuple
-
+import os
 class SkillAdapter(nn.Module):
     """
     A tiny neural network that learns to transform the user input + DNA context
     into a 'skill embedding' that improves the LLM's response.
     We'll use a simple MLP with 2 hidden layers.
     """
-    def __init__(self, input_dim=128+128, hidden_dim=128, output_dim=128):
+    def __init__(self, input_dim=24, hidden_dim=24, output_dim=12):
         super().__init__()
         self.fc1 = nn.Linear(input_dim, hidden_dim)
         self.fc2 = nn.Linear(hidden_dim, hidden_dim)
