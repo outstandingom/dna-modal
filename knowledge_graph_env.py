@@ -331,7 +331,7 @@ class FeatureRegistry:
         self.ontology.restore(data["ontology"])
 
 # ============================================================
-# Letter Vectors (Enhanced with mass)
+# ========== 🔥 CHANGE 1: LETTER VECTORS — FROZEN ==========
 # ============================================================
 class LetterVectors:
     def __init__(self, dims: int = 128):
@@ -345,17 +345,11 @@ class LetterVectors:
     def get_importance(self, letter: str) -> float:
         return self.letter_importance.get(letter, 1.0)
 
+    # 🔥🔥🔥 CHANGE 1: LETTERS ARE NOW PERMANENTLY FROZEN
+    # This prevents catastrophic forgetting of the base alphabet.
     def update(self, letter: str, delta: np.ndarray, layer: PriorityLayer = PriorityLayer.ATOMIC):
-        delta = np.clip(delta, -GRAD_CLIP, GRAD_CLIP)
-        lr_map = {
-            PriorityLayer.ATOMIC: LR_ATOMIC,
-            PriorityLayer.CLUSTER: LR_CLUSTER,
-            PriorityLayer.DOMAIN: LR_DOMAIN,
-            PriorityLayer.UNIVERSAL: LR_UNIVERSAL
-        }
-        self.vec[letter] += delta * lr_map[layer]
-        # Increment importance on update
-        self.letter_importance[letter] = min(10.0, self.letter_importance[letter] + 0.01)
+        # The 26 letters are the physical laws of this universe. They never change.
+        pass
 
     def serialize(self) -> dict:
         return {
@@ -532,6 +526,7 @@ class DNAConcept:
                     delta_l = force * 0.5 * gradient * full_grad / norm_grad
                     
                     self.feature_registry.update_vector(fid, delta_f, layer)
+                    # LETTER VECTORS ARE NOW FROZEN, so this update does nothing
                     self.letter_vec.update(ch, delta_l, PriorityLayer.ATOMIC)
 
     # ========== PHASE 2.2: Partitioned Similarity ==========
@@ -930,6 +925,13 @@ class ConceptMemory:
         # PHASE 4.3: Pending updates buffer
         self.pending_updates: List[Tuple[str, str, float, str]] = []
         
+        # ========== 🔥 CHANGE 3: GLOBAL SYNAPSE ==========
+        # This is the master 26x26 matrix that binds all clusters together.
+        self.global_synapse = np.full((26, 26), 0.5, dtype=np.float32)
+        np.fill_diagonal(self.global_synapse, 0.5)
+        self.synapse_step = 0
+        self._load_synapse()
+        
         # FAISS
         self._faiss_available = False
         self.index = None
@@ -946,6 +948,21 @@ class ConceptMemory:
             self._faiss_available = True
         except Exception:
             self._faiss_available = False
+
+    # --- Synapse Persistence ---
+    def _load_synapse(self):
+        path = os.path.join(PERSIST_DIR, "global_synapse.npy")
+        if os.path.exists(path):
+            try:
+                self.global_synapse = np.load(path)
+                self.synapse_step = int(np.load(path.replace(".npy", "_step.npy"))) if os.path.exists(path.replace(".npy", "_step.npy")) else 0
+            except Exception:
+                pass
+
+    def _save_synapse(self):
+        path = os.path.join(PERSIST_DIR, "global_synapse.npy")
+        np.save(path, self.global_synapse)
+        np.save(path.replace(".npy", "_step.npy"), np.array([self.synapse_step]))
 
     # ========== PHASE 4.1: Global Context ==========
     def update_global_centroid(self):
@@ -1033,6 +1050,19 @@ class ConceptMemory:
         return concept
 
     # ========== PHASE 1.1, 1.2: Weighted & Colored Relationships ==========
+    def _get_letter_probs(self, concept_vector: np.ndarray) -> np.ndarray:
+        """Project a 128-dim concept back onto the 26 letters."""
+        if concept_vector is None:
+            return np.ones(26) / 26
+        if concept_vector.ndim == 1:
+            concept_vector = concept_vector.reshape(-1, 1)
+        # Use frozen letter vectors
+        letter_matrix = np.array([self.letter_vec.get(ch) for ch in ALPHABET])
+        raw = letter_matrix @ concept_vector
+        raw = np.squeeze(raw)
+        exp_act = np.exp(raw * 2.0)
+        return exp_act / (np.sum(exp_act) + 1e-8)
+
     def add_weighted_relationship(self, a: str, b: str, weight: float = 1.0, 
                                    color: str = "RELATED"):
         a_low, b_low = a.lower(), b.lower()
@@ -1069,11 +1099,30 @@ class ConceptMemory:
         self.relationships[a_low].add(b_low)
         self.relationships[b_low].add(a_low)
         
-        # Move vectors with inertia
+        # Move vectors with inertia (This triggers your original Sine-Hebbian backprop)
         self.concepts[a_low].move_towards(self.concepts[b_low], 
                                            lr=LR_CONCEPT, 
                                            weight=weight, 
                                            color=color)
+        
+        # ========== 🔥 CHANGE 3: UPDATE GLOBAL SYNAPSE ==========
+        # Update the master 26x26 matrix using Sine-Hebbian learning
+        probs_a = self._get_letter_probs(self.concepts[a_low].vector)
+        probs_b = self._get_letter_probs(self.concepts[b_low].vector)
+        
+        self.synapse_step += 1
+        # Sine-modulated learning rate
+        sine_lr = 0.01 * (0.5 + 0.5 * math.sin(self.synapse_step / 15.0))
+        hebbian_delta = (weight - 0.5) * 2.0
+        
+        # Co-activation: if letters fire together, strengthen their bond
+        co_activation = np.outer(probs_a, probs_b) + np.outer(probs_b, probs_a)
+        self.global_synapse += sine_lr * hebbian_delta * co_activation
+        self.global_synapse = np.clip(self.global_synapse, 0.01, 0.99)
+        np.fill_diagonal(self.global_synapse, 0.5)
+        
+        if self.synapse_step % 10 == 0:
+            self._save_synapse()
 
     def add_relationship(self, a: str, b: str):
         """Legacy method for backward compatibility."""
@@ -1210,6 +1259,7 @@ class ConceptMemory:
             return "CAUSES"
         return "RELATED"
 
+    # ========== 🔥 CHANGE 2: SINE-COMPRESSION PRUNING ==========
     def _prune(self):
         if len(self.concepts) > self.max_concepts:
             # Sort by importance (keep high importance concepts)
@@ -1218,7 +1268,35 @@ class ConceptMemory:
                 key=lambda x: (x[1].importance, len(self.weighted_relationships.get(x[0], {}))),
                 reverse=True
             )
-            to_keep = sorted_concepts[:self.max_concepts]
+            
+            # Keep the top 80%
+            keep_threshold = int(self.max_concepts * 0.8)
+            to_keep = sorted_concepts[:keep_threshold]
+            to_compress = sorted_concepts[keep_threshold:]
+            
+            # 🔥 INSTEAD OF DELETING, COMPRESS USING SINE-WEIGHTED AVERAGE
+            if to_compress:
+                super_vector = np.zeros(128)
+                super_importance = 0
+                for name, concept in to_compress:
+                    if concept.vector is not None:
+                        # Sine-weighted average to preserve the "essence"
+                        sine_weight = math.sin(concept.importance) + 0.1
+                        super_vector += sine_weight * concept.vector
+                        super_importance += concept.importance
+                
+                if np.linalg.norm(super_vector) > 0:
+                    super_vector = super_vector / np.linalg.norm(super_vector)
+                    compressed_name = f"compressed_{int(time.time())}"
+                    # Register as a compressed memory cluster
+                    self.register(compressed_name, 
+                                  [self.feature_registry.register("compressed")], 
+                                  [self.feature_registry.register("compressed")],
+                                  importance=super_importance * 0.1, 
+                                  domain="general")
+                    self.concepts[compressed_name].vector = super_vector
+            
+            # Now update the dictionary
             self.concepts = {name: concept for name, concept in to_keep}
             
             # Clean up relationships for removed concepts
@@ -1242,7 +1320,9 @@ class ConceptMemory:
                 for k, v in self.weighted_relationships.items()
             },
             "relationships": {k: list(v) for k, v in self.relationships.items()},
-            "global_centroid": self.global_centroid.tolist() if self.global_centroid is not None else None
+            "global_centroid": self.global_centroid.tolist() if self.global_centroid is not None else None,
+            "global_synapse": self.global_synapse.tolist(),
+            "synapse_step": self.synapse_step
         }
 
     def restore(self, data: dict):
@@ -1263,6 +1343,10 @@ class ConceptMemory:
         
         if data.get("global_centroid"):
             self.global_centroid = np.array(data["global_centroid"], dtype=np.float32)
+        
+        if data.get("global_synapse"):
+            self.global_synapse = np.array(data["global_synapse"], dtype=np.float32)
+            self.synapse_step = data.get("synapse_step", 0)
         
         self._rebuild_index()
 
