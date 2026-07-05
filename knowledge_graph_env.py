@@ -2084,8 +2084,8 @@ def _build_client(req: AgentRequest):
     # Fallback to global .env configuration
     if openai_client:
         return openai_client, MODEL_NAME, "default"
-    
-    raise HTTPException(status_code=503, detail="No LLM configured. Please provide a provider and API key, or configure one in the server .env file.")
+    # Fallback to independent local graph mode
+    return None, None, "local_graph"
 
 
 @app.post("/agent", response_model=AgentResponse)
@@ -2159,6 +2159,27 @@ async def agent_endpoint(req: AgentRequest):
     ]
 
     import json
+    
+    def independent_fallback():
+        # Independent pure-vector execution without external LLM
+        predictions = _api_env.predictive_reasoning.multi_hop_reasoning(req.message.lower(), max_hops=2)
+        learned = _api_env.extract_and_learn(req.message, ns)
+        
+        response_text = "🧠 **Independent Graph Mode** (No external AI needed)\n\n"
+        if learned and "extracted_concepts" in learned and learned["extracted_concepts"]:
+            response_text += f"- **I just learned**: {', '.join(learned['extracted_concepts'])}\n"
+            
+        if predictions:
+            top_preds = [k for k in predictions.keys()][:5]
+            response_text += f"- **My internal vector thoughts**: {', '.join(top_preds)}\n"
+        else:
+            response_text += "- I absorbed your input, but I don't have enough vector connections to formulate a deep thought about it yet.\n"
+            
+        return AgentResponse(response=response_text.strip(), tool_calls=[], provider_used="local_graph")
+
+    if client is None:
+        return independent_fallback()
+
     try:
         response = client.chat.completions.create(
             model=model_name,
@@ -2167,7 +2188,9 @@ async def agent_endpoint(req: AgentRequest):
             tool_choice="auto"
         )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"LLM Tool Calling Failed: {e}")
+        # If external LLM fails (e.g. rate limit, balance, decommissioned), fallback gracefully!
+        print(f"External LLM Failed: {e}. Falling back to Independent Mode.")
+        return independent_fallback()
 
     response_message = response.choices[0].message
     
