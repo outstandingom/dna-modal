@@ -85,6 +85,13 @@ MODEL_NAME = os.getenv("MODEL_NAME", "zai-org/GLM-5.2")
 # All providers use OpenAI-compatible API format.
 # ============================================================
 PROVIDER_REGISTRY = {
+    "local_graph": {
+        "name": "Independent Graph Mode (No LLM)",
+        "base_url": "",
+        "default_model": "native-12-dim-vectors",
+        "free_tier": True,
+        "get_key_url": ""
+    },
     "groq": {
         "name": "Groq",
         "base_url": "https://api.groq.com/openai/v1",
