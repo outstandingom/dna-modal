@@ -23,6 +23,8 @@ import openai
 # ============================================================
 from graders import task_easy, task_medium, task_hard, TASKS, GRADERS
 from skill_adapter import get_adapter
+from projection import DimensionProjector, ProjectionCache
+from dynamic_knowledge_loader import DynamicKnowledgeLoader, ConceptData
 
 # ============================================================
 # Configuration
@@ -1481,6 +1483,62 @@ class KnowledgeGraphEnv:
         self.current_step = 0
         self.episode_reward = 0.0
         self.done = False
+        
+        # ── Projection Layer: 128-dim brain ↔ 12-dim judge ──
+        self.projector = DimensionProjector(persist_path=os.path.join(PERSIST_DIR, "projection.pkl"))
+        self.projection_cache = ProjectionCache(max_size=10000)
+        
+        # ── Dynamic Knowledge Loader ──
+        self.knowledge_loader = DynamicKnowledgeLoader()
+        
+        # Train projector once concepts are available
+        self._train_projector()
+
+    def _train_projector(self):
+        """Train the 128→12 projection from existing concept vectors."""
+        try:
+            concept_vectors = [
+                c.vector for c in self.concept_memory.concepts.values()
+                if hasattr(c, 'vector') and c.vector is not None
+            ]
+            if concept_vectors:
+                self.projector.train_from_concepts(concept_vectors)
+                print(f"[PROJECTOR] Trained on {len(concept_vectors)} concept vectors.")
+            else:
+                self.projector._random_projection()
+                print("[PROJECTOR] No concepts yet — using random projection.")
+        except Exception as e:
+            print(f"[PROJECTOR WARN] Could not train projector: {e}. Using random fallback.")
+            self.projector._random_projection()
+
+    def project_concept(self, concept_name: str) -> np.ndarray:
+        """Get the 12-dim projection of a concept vector."""
+        concept_name = concept_name.lower()
+        cached = self.projection_cache.get(concept_name)
+        if cached is not None:
+            return cached
+        concept = self.concept_memory.concepts.get(concept_name)
+        if concept is None or not hasattr(concept, 'vector') or concept.vector is None:
+            return np.zeros(12)
+        projected = self.projector.project_128_to_12(concept.vector)
+        self.projection_cache.set(concept_name, projected)
+        return projected
+
+    def get_skill_vector_from_text(self, text: str) -> np.ndarray:
+        """Full pipeline: text → 128-dim letter vec → projected 12-dim → SkillAdapter 12-dim output."""
+        try:
+            seq = self.letter_vec.get_dna_sequence(text)  # use main 128-dim letter vecs
+            if seq.shape[0] == 0:
+                embedding_128 = np.zeros(128)
+            else:
+                embedding_128 = np.mean(seq, axis=0)
+            embedding_12 = self.projector.project_128_to_12(embedding_128)
+            memory_context = np.zeros(12)
+            skill_vector = get_adapter()(embedding_12, memory_context)
+            return skill_vector
+        except Exception as e:
+            print(f"[SKILL WARN] Could not compute skill vector: {e}")
+            return np.zeros(12)
 
     def _seed_initial_concepts(self):
         if len(self.concept_memory.concepts) > 0:
@@ -2150,14 +2208,8 @@ async def agent_endpoint(req: AgentRequest):
         }
     ]
 
-    # Extract 12-dim vectors from predictive submodel
-    import numpy as np
-    seq = _api_env.predictive_letter_vec.get_dna_sequence(req.message)
-    user_embedding = np.mean(seq, axis=0) if seq.shape[0] > 0 else np.zeros(12)
-    memory_context = np.zeros(12)  # Default 0s for memory context
-    
-    # Get 12-dim skill vector from neural network adapter
-    skill_vector = get_adapter()(user_embedding, memory_context)
+    # Full pipeline: text → 128-dim → projected 12-dim → SkillAdapter
+    skill_vector = _api_env.get_skill_vector_from_text(req.message)
     skill_vector_str = "[" + ", ".join([f"{x:.2f}" for x in skill_vector]) + "]"
 
     messages = [
@@ -2256,3 +2308,81 @@ async def agent_endpoint(req: AgentRequest):
             return AgentResponse(response=f"Graph updated, but final response generation failed: {e}", tool_calls=executed_tools, provider_used=provider_used)
         
     return AgentResponse(response=response_message.content or "No action taken.", tool_calls=[], provider_used=provider_used)
+
+
+# ============================================================
+# PROJECTION ENDPOINTS
+# ============================================================
+
+@app.get("/projection/info")
+async def projection_info_endpoint():
+    """Get information about the 128->12 dimension projection layer."""
+    if _api_env is None:
+        raise HTTPException(status_code=503, detail="Environment still initializing.")
+    info = _api_env.projector.explain()
+    return {
+        "projection": info,
+        "cache_size": len(_api_env.projection_cache.cache),
+        "concepts_in_graph": len(_api_env.concept_memory.concepts)
+    }
+
+@app.post("/projection/retrain")
+async def projection_retrain_endpoint():
+    """Retrain the projection layer from the current concept vectors."""
+    if _api_env is None:
+        raise HTTPException(status_code=503, detail="Environment still initializing.")
+    _api_env.projection_cache.clear()
+    _api_env._train_projector()
+    return {"status": "ok", "message": "Projection retrained successfully."}
+
+
+# ============================================================
+# DYNAMIC KNOWLEDGE LOADER ENDPOINT
+# ============================================================
+
+class KnowledgeLoadRequest(BaseModel):
+    source: str = "technology"  # builtin source name
+
+@app.post("/knowledge/load")
+async def load_knowledge_endpoint(req: KnowledgeLoadRequest):
+    """Load a built-in knowledge domain into the graph."""
+    if _api_env is None:
+        raise HTTPException(status_code=503, detail="Environment still initializing.")
+    
+    loader = _api_env.knowledge_loader
+    n = loader._load_builtin(req.source)
+    if n == 0 and req.source not in loader.builtin_sources:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Unknown source '{req.source}'. Available: {list(loader.builtin_sources.keys())}"
+        )
+    
+    # Inject loaded concepts into the knowledge graph
+    concepts_added = []
+    for cd in loader.concepts:
+        physical_fids = [_api_env.feature_registry.register(f) for f in cd.features]
+        semantic_fids = [_api_env.feature_registry.register(f) for f in cd.features]
+        _api_env.concept_memory.register(
+            cd.name, physical_fids, semantic_fids,
+            importance=cd.importance, domain=cd.domain
+        )
+        concepts_added.append(cd.name)
+        # Sync to predictive 12-dim model
+        p_phys = [_api_env.predictive_feature_registry.register(f) for f in cd.features]
+        p_sem  = [_api_env.predictive_feature_registry.register(f) for f in cd.features]
+        _api_env.predictive_concept_memory.register(
+            cd.name, p_phys, p_sem, importance=cd.importance, domain=cd.domain
+        )
+
+    # Retrain projector with new concepts
+    _api_env._train_projector()
+    _api_env.projection_cache.clear()
+
+    return {
+        "status": "ok",
+        "source": req.source,
+        "concepts_added": len(concepts_added),
+        "concept_names": concepts_added[:20],
+        "total_in_graph": len(_api_env.concept_memory.concepts)
+    }
+
