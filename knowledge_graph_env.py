@@ -2123,8 +2123,36 @@ async def list_concepts_endpoint(limit: int = 100):
             "domain": concept.domain,
             "relationship_count": len(_api_env.concept_memory.weighted_relationships.get(name, {}))
         })
-    
     return {"concepts": concepts, "total": len(_api_env.concept_memory.concepts)}
+
+@app.get("/graph")
+async def get_graph_endpoint():
+    """Return the entire knowledge graph for visualization."""
+    if _api_env is None:
+        raise HTTPException(status_code=503, detail="Environment still initializing.")
+    
+    nodes = []
+    links = []
+    
+    # 1. Add all nodes
+    for name, concept in _api_env.concept_memory.concepts.items():
+        nodes.append({
+            "id": name,
+            "domain": concept.domain,
+            "importance": concept.importance
+        })
+        
+    # 2. Add all bonded relationships (links)
+    for source, targets in _api_env.concept_memory.weighted_relationships.items():
+        for target, (weight, color) in targets.items():
+            links.append({
+                "source": source,
+                "target": target,
+                "weight": weight,
+                "color": color
+            })
+            
+    return {"nodes": nodes, "links": links}
 
 
 # ========== NEW INSTRUCTION DNA ENDPOINTS ==========
