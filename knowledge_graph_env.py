@@ -1760,6 +1760,43 @@ class KnowledgeGraphEnv:
         else:
             return 0.05
 
+    def extract_and_learn(self, text: str, namespace: str = "") -> dict:
+        """Extract concepts from text and learn them into both 128-dim and 12-dim graphs.
+        Returns dict with extracted_concepts list."""
+        words = [w for w in text.lower().split() if len(w) > 3 and w not in STOP_WORDS]
+        unique = list(set(words))[:15]
+        extracted = []
+
+        for kw in unique:
+            name = f"{namespace}{kw}" if namespace else kw
+            if name not in self.concept_memory.concepts:
+                features = self.ontology.get_features(kw)
+                physical_fids = [self.feature_registry.register(f) for f in features]
+                semantic_fids = [self.feature_registry.register(f) for f in features]
+                self.concept_memory.register(name, physical_fids, semantic_fids,
+                                              importance=1.0, domain="general")
+                # Sync to predictive 12-dim model
+                p_phys = [self.predictive_feature_registry.register(f) for f in features]
+                p_sem = [self.predictive_feature_registry.register(f) for f in features]
+                self.predictive_concept_memory.register(name, p_phys, p_sem,
+                                                        importance=1.0, domain="general")
+            extracted.append(name)
+
+        # Create relationships between co-occurring concepts
+        for i in range(len(extracted)):
+            for j in range(i + 1, min(i + 4, len(extracted))):
+                color = self.concept_memory._infer_relationship_color(text, extracted[i], extracted[j])
+                if extracted[i] in self.concept_memory.concepts and extracted[j] in self.concept_memory.concepts:
+                    self.concept_memory.add_weighted_relationship(
+                        extracted[i], extracted[j], weight=0.8, color=color
+                    )
+                if extracted[i] in self.predictive_concept_memory.concepts and extracted[j] in self.predictive_concept_memory.concepts:
+                    self.predictive_concept_memory.add_weighted_relationship(
+                        extracted[i], extracted[j], weight=0.8, color=color
+                    )
+
+        return {"extracted_concepts": extracted}
+
     def close(self):
         if self.trainer:
             self.trainer.stop()
@@ -1891,6 +1928,29 @@ class InstructionRequest(BaseModel):
 class RuleRequest(BaseModel):
     condition: Dict
     action: str
+
+
+# ── Orchestrator Models ───────────────────────────────────────────
+class OrchestrateRequest(BaseModel):
+    message: str
+    session_id: Optional[str] = None
+    provider: Optional[str] = None
+    api_key: Optional[str] = None
+    model: Optional[str] = None
+    custom_base_url: Optional[str] = None
+
+class OrchestrateResponse(BaseModel):
+    learned_concepts: List[str]
+    essence_matches: List[dict]
+    identity_matches: List[dict]
+    predictions: dict
+    generated_sentence: Optional[str] = None
+    skill_vector: List[float]
+    projection_status: str
+    ai_summary: Optional[str] = None
+    provider_used: str
+    total_concepts_in_graph: int
+    total_relationships: int
 
 
 # ── Existing Endpoints (UNCHANGED) ────────────────────────────────
@@ -2386,3 +2446,155 @@ async def load_knowledge_endpoint(req: KnowledgeLoadRequest):
         "total_in_graph": len(_api_env.concept_memory.concepts)
     }
 
+
+# ============================================================
+# 🧬 THE ORCHESTRATOR — Single Unified DNA Model API
+# ============================================================
+
+@app.post("/orchestrate", response_model=OrchestrateResponse)
+async def orchestrate_endpoint(req: OrchestrateRequest):
+    """🧬 THE ORCHESTRATOR — Single unified DNA Model API.
+    Send one message, get the full pipeline result:
+    extract → search → predict → project → generate → (optional LLM summary).
+    """
+    if not _env_ready or _api_env is None:
+        raise HTTPException(status_code=503, detail="Environment not ready")
+
+    ns = f"user_{req.session_id[:8]}:" if req.session_id else ""
+    message_lower = req.message.lower()
+
+    # ── Step 1: Extract & Learn ──────────────────────────────
+    learned = _api_env.extract_and_learn(req.message, ns)
+    learned_concepts = learned.get("extracted_concepts", [])
+
+    # ── Step 2: Search by Essence (physical features, dims 0-3) ──
+    essence_results = []
+    for concept_name in learned_concepts[:3]:  # search top 3 learned concepts
+        if concept_name in _api_env.concept_memory.concepts:
+            vec = _api_env.concept_memory.concepts[concept_name].vector
+            results = _api_env.concept_memory.partitioned_search(vec, top_k=5, partition=ESSENCE_DIMS)
+            for name, score in results:
+                if name != concept_name:
+                    essence_results.append({"concept": name, "score": round(float(score), 4)})
+    # Deduplicate and sort
+    seen = set()
+    unique_essence = []
+    for r in sorted(essence_results, key=lambda x: x["score"], reverse=True):
+        if r["concept"] not in seen:
+            seen.add(r["concept"])
+            unique_essence.append(r)
+    essence_results = unique_essence[:5]
+
+    # ── Step 3: Search by Identity (semantic features, dims 4-11) ──
+    identity_results = []
+    for concept_name in learned_concepts[:3]:
+        if concept_name in _api_env.concept_memory.concepts:
+            vec = _api_env.concept_memory.concepts[concept_name].vector
+            results = _api_env.concept_memory.partitioned_search(vec, top_k=5, partition=IDENTITY_DIMS)
+            for name, score in results:
+                if name != concept_name:
+                    identity_results.append({"concept": name, "score": round(float(score), 4)})
+    seen = set()
+    unique_identity = []
+    for r in sorted(identity_results, key=lambda x: x["score"], reverse=True):
+        if r["concept"] not in seen:
+            seen.add(r["concept"])
+            unique_identity.append(r)
+    identity_results = unique_identity[:5]
+
+    # ── Step 4: Fuzzy Prediction (12-dim predictive submodel) ──
+    predictions = _api_env.predictive_reasoning.multi_hop_reasoning(message_lower, max_hops=2)
+
+    # ── Step 5: Generate Sentence for top matched concept ──
+    generated_sentence = None
+    top_concept = None
+    if essence_results:
+        top_concept = essence_results[0]["concept"]
+    elif learned_concepts:
+        top_concept = learned_concepts[0]
+    if top_concept and top_concept in _api_env.concept_memory.concepts:
+        generated_sentence = _api_env.reasoning_engine.generate_sentence(top_concept)
+
+    # ── Step 6: Project to 12-dim Skill Vector ───────────────
+    skill_vector = _api_env.get_skill_vector_from_text(req.message)
+    projection_info = _api_env.projector.explain()
+    projection_status = projection_info.get("status", "unknown")
+
+    # ── Step 7: Optional LLM Synthesis ───────────────────────
+    ai_summary = None
+    provider_used = "local_graph"
+
+    # Build agent request to reuse _build_client
+    agent_req = AgentRequest(
+        message=req.message,
+        session_id=req.session_id,
+        provider=req.provider,
+        api_key=req.api_key,
+        model=req.model,
+        custom_base_url=req.custom_base_url,
+    )
+    client, model_name, provider_used = _build_client(agent_req)
+
+    if client is not None:
+        try:
+            # Build a rich context from all pipeline results
+            context_parts = []
+            if learned_concepts:
+                context_parts.append(f"Learned concepts: {', '.join(learned_concepts[:10])}")
+            if essence_results:
+                context_parts.append(f"Related by essence: {', '.join(r['concept'] for r in essence_results[:5])}")
+            if identity_results:
+                context_parts.append(f"Related by identity: {', '.join(r['concept'] for r in identity_results[:5])}")
+            if predictions:
+                top_preds = list(predictions.keys())[:5]
+                context_parts.append(f"Fuzzy predictions: {', '.join(top_preds)}")
+            if generated_sentence:
+                context_parts.append(f"Description: {generated_sentence}")
+
+            context_str = "\n".join(context_parts)
+            skill_str = "[" + ", ".join([f"{x:.2f}" for x in skill_vector]) + "]"
+
+            llm_response = client.chat.completions.create(
+                model=model_name,
+                messages=[
+                    {"role": "system", "content": f"You are the DNA Knowledge Graph assistant. Use the following internal graph analysis to provide a helpful, concise response. Skill vector: {skill_str}\n\nInternal Analysis:\n{context_str}"},
+                    {"role": "user", "content": req.message}
+                ],
+                temperature=0.7,
+                max_tokens=500
+            )
+            ai_summary = llm_response.choices[0].message.content
+        except Exception as e:
+            ai_summary = f"[LLM synthesis failed: {e}. See raw pipeline results above.]"
+    else:
+        # Build a local summary from pipeline results
+        parts = ["🧠 **DNA Graph Analysis** (Independent Mode)\n"]
+        if learned_concepts:
+            parts.append(f"📚 **Learned**: {', '.join(learned_concepts[:8])}")
+        if essence_results:
+            parts.append(f"🔬 **Related (essence)**: {', '.join(r['concept'] for r in essence_results[:3])}")
+        if identity_results:
+            parts.append(f"🧬 **Related (identity)**: {', '.join(r['concept'] for r in identity_results[:3])}")
+        if predictions:
+            top_preds = list(predictions.keys())[:5]
+            parts.append(f"🔮 **Predictions**: {', '.join(top_preds)}")
+        if generated_sentence:
+            parts.append(f"💡 **Insight**: {generated_sentence}")
+        ai_summary = "\n".join(parts)
+
+    # ── Count relationships ──────────────────────────────────
+    total_rels = sum(len(v) for v in _api_env.concept_memory.weighted_relationships.values())
+
+    return OrchestrateResponse(
+        learned_concepts=learned_concepts,
+        essence_matches=essence_results,
+        identity_matches=identity_results,
+        predictions=predictions,
+        generated_sentence=generated_sentence,
+        skill_vector=[round(float(x), 6) for x in skill_vector],
+        projection_status=projection_status,
+        ai_summary=ai_summary,
+        provider_used=provider_used,
+        total_concepts_in_graph=len(_api_env.concept_memory.concepts),
+        total_relationships=total_rels,
+    )
