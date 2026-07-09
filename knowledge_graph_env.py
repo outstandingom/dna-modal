@@ -2655,3 +2655,10 @@ async def orchestrate_endpoint(req: OrchestrateRequest):
         total_concepts_in_graph=len(_api_env.concept_memory.concepts),
         total_relationships=total_rels,
     )
+
+if __name__ == "__main__":
+    import uvicorn
+    import os
+    # Render sets the PORT environment variable dynamically
+    port = int(os.environ.get("PORT", 10000))
+    uvicorn.run(app, host="0.0.0.0", port=port)
