@@ -1582,6 +1582,30 @@ class KnowledgeGraphEnv:
         self.predictive_concept_memory.add_weighted_relationship("feature request", "enhancement", weight=0.9, color="IS_A")
         self.predictive_concept_memory.add_weighted_relationship("login issue", "authentication", weight=0.95, color="IS_A")
         self.predictive_concept_memory.add_weighted_relationship("account locked", "security", weight=0.85, color="HAS")
+        
+        # ── AUTO-LOAD ALL BUILT-IN OFFLINE KNOWLEDGE ──
+        print("[KNOWLEDGE] Loading offline builtin knowledge graph...")
+        n_loaded = self.knowledge_loader.load_builtin_knowledge()
+        for cd in self.knowledge_loader.concepts:
+            # Register in main 128-dim graph
+            physical_fids = [self.feature_registry.register(f) for f in cd.features]
+            semantic_fids = [self.feature_registry.register(f) for f in cd.features]
+            self.concept_memory.register(cd.name.lower(), physical_fids, semantic_fids, 
+                                         importance=cd.importance, domain=cd.domain)
+            
+            # Register in predictive 12-dim submodel
+            p_phys_fids = [self.predictive_feature_registry.register(f) for f in cd.features]
+            p_sem_fids = [self.predictive_feature_registry.register(f) for f in cd.features]
+            self.predictive_concept_memory.register(cd.name.lower(), p_phys_fids, p_sem_fids, 
+                                                    importance=cd.importance, domain=cd.domain)
+        
+        # Add relationships for offline knowledge
+        for cd in self.knowledge_loader.concepts:
+            for target, color, weight in cd.relationships:
+                self.concept_memory.add_weighted_relationship(cd.name.lower(), target.lower(), weight=weight, color=color)
+                self.predictive_concept_memory.add_weighted_relationship(cd.name.lower(), target.lower(), weight=weight, color=color)
+        
+        print(f"[KNOWLEDGE] Successfully injected {n_loaded} offline concepts and features into the graph.")
 
     # Instance methods (delegate to imported graders)
     def task_easy(self, input_text: str) -> float:
@@ -2283,19 +2307,52 @@ async def agent_endpoint(req: AgentRequest):
     
     def independent_fallback():
         # Independent pure-vector execution without external LLM
-        predictions = _api_env.predictive_reasoning.multi_hop_reasoning(req.message.lower(), max_hops=2)
         learned = _api_env.extract_and_learn(req.message, ns)
+        learned_concepts = learned.get("extracted_concepts", [])
         
-        response_text = "🧠 **Independent Graph Mode** (No external AI needed)\n\n"
-        if learned and "extracted_concepts" in learned and learned["extracted_concepts"]:
-            response_text += f"- **I just learned**: {', '.join(learned['extracted_concepts'])}\n"
+        # 1. Physical features (Essence)
+        essence_results = _api_env.concept_memory.partitioned_search(req.message, partition="physical", top_k=3)
+        
+        # 2. Semantic features (Identity)
+        identity_results = _api_env.concept_memory.partitioned_search(req.message, partition="semantic", top_k=3)
+        
+        # 3. 12-dim predictive submodel
+        predictions = _api_env.predictive_reasoning.multi_hop_reasoning(req.message.lower(), max_hops=2)
+        
+        # 4. Generate local sentence using highest similarity concept
+        generated_sentence = ""
+        top_concept = None
+        if essence_results:
+            top_concept = essence_results[0]['concept']
+        elif identity_results:
+            top_concept = identity_results[0]['concept']
+            
+        if top_concept:
+            generated_sentence = _api_env.generate_sentence(top_concept)
+        
+        # Build response
+        parts = ["🧠 **DNA Graph Analysis** (Independent Mode)\n"]
+        
+        if learned_concepts:
+            parts.append(f"📚 **Learned**: {', '.join(learned_concepts[:8])}")
+            
+        if essence_results:
+            parts.append(f"🔬 **Related Features (Essence)**: {', '.join(r['concept'] for r in essence_results[:3])}")
+            
+        if identity_results:
+            parts.append(f"🧬 **Related Identity**: {', '.join(r['concept'] for r in identity_results[:3])}")
             
         if predictions:
-            top_preds = [k for k in predictions.keys()][:5]
-            response_text += f"- **My internal vector thoughts**: {', '.join(top_preds)}\n"
-        else:
-            response_text += "- I absorbed your input, but I don't have enough vector connections to formulate a deep thought about it yet.\n"
+            top_preds = list(predictions.keys())[:5]
+            parts.append(f"🔮 **Vector Predictions**: {', '.join(top_preds)}")
             
+        if generated_sentence:
+            parts.append(f"\n💡 **Feature Output**: {generated_sentence}")
+            
+        if not (learned_concepts or essence_results or identity_results or predictions):
+            parts.append("- I absorbed your input, but I don't have enough vector connections to formulate a deep thought about it yet.")
+            
+        response_text = "\n".join(parts)
         return AgentResponse(response=response_text.strip(), tool_calls=[], provider_used="local_graph")
 
     if client is None:
