@@ -1833,15 +1833,8 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://growhaz.com",
-        "https://growhaz.com",
-        "http://growhaz.in",
-        "https://growhaz.in",
-        "https://dna-modal-frontend-1f0u2pi6e-ouikey41-gmailcoms-projects.vercel.app",
-        "https://*.vercel.app",
-    ],
-    allow_credentials=True,
+    allow_origins=["*"],
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
