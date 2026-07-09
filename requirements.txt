@@ -1,13 +1,10 @@
---extra-index-url https://download.pytorch.org/whl/cpu
 numpy
-faiss-cpu
 fastapi
-uvicorn
+uvicorn[standard]
 httpx
 pydantic
 openai
-openenv-core>=0.2.0
 python-dotenv
-torch
 pyyaml
 requests
+scikit-learn
