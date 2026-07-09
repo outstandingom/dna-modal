@@ -2310,11 +2310,24 @@ async def agent_endpoint(req: AgentRequest):
         learned = _api_env.extract_and_learn(req.message, ns)
         learned_concepts = learned.get("extracted_concepts", [])
         
-        # 1. Physical features (Essence)
-        essence_results = _api_env.concept_memory.partitioned_search(req.message, partition="physical", top_k=3)
+        essence_results = []
+        identity_results = []
         
-        # 2. Semantic features (Identity)
-        identity_results = _api_env.concept_memory.partitioned_search(req.message, partition="semantic", top_k=3)
+        for concept_name in learned_concepts:
+            if concept_name in _api_env.concept_memory.concepts:
+                vec = _api_env.concept_memory.concepts[concept_name].vector
+                
+                # 1. Physical features (Essence)
+                e_res = _api_env.concept_memory.partitioned_search(vec, partition=ESSENCE_DIMS, top_k=3)
+                for name, score in e_res:
+                    if name != concept_name and not any(r['concept'] == name for r in essence_results):
+                        essence_results.append({"concept": name, "score": score})
+                        
+                # 2. Semantic features (Identity)
+                i_res = _api_env.concept_memory.partitioned_search(vec, partition=IDENTITY_DIMS, top_k=3)
+                for name, score in i_res:
+                    if name != concept_name and not any(r['concept'] == name for r in identity_results):
+                        identity_results.append({"concept": name, "score": score})
         
         # 3. 12-dim predictive submodel
         predictions = _api_env.predictive_reasoning.multi_hop_reasoning(req.message.lower(), max_hops=2)
