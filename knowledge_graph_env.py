@@ -2141,11 +2141,14 @@ async def evaluate_rule_endpoint(req: RuleRequest):
 @app.get("/")
 async def root():
     return {
-        "name": "Knowledge Graph Environment",
-        "version": "3.0.0",
+        "name": "Knowledge Graph Environment (BYOK Architecture)",
+        "version": "4.0.0",
         "status": "online" if _api_env else "initializing",
-        "message": "DNA model with Instruction Logic (arithmetic, IF-THEN rules).",
+        "message": "DNA Graph Memory Layer. Supports dynamic per-request LLM routing.",
         "endpoints": [
+            "GET /ping - Check API health",
+            "POST /agent - Main BYOK agent chat endpoint",
+            "GET /graph - Get complete graph state for 3D visualization",
             "POST /calculate - Evaluate math expression",
             "POST /instruction/execute - Run single arithmetic op",
             "POST /evaluate - Evaluate condition-action rules",
