@@ -70,18 +70,9 @@ GLOBAL_UPDATE_FREQUENCY = 10  # Update centroid every N batches
 os.makedirs(PERSIST_DIR, exist_ok=True)
 
 load_dotenv()
-USE_VALIDATOR_PROXY = os.environ.get("API_BASE_URL") is not None
-if USE_VALIDATOR_PROXY:
-    API_BASE_URL = os.environ["API_BASE_URL"]
-    API_KEY = os.environ["API_KEY"]
-    openai_client = openai.OpenAI(base_url=API_BASE_URL, api_key=API_KEY)
-else:
-    # Default: use Hugging Face Inference Router with Qwen
-    API_BASE_URL = "https://router.huggingface.co/v1"
-    API_KEY = os.getenv("HF_TOKEN", "")
-    openai_client = openai.OpenAI(base_url=API_BASE_URL, api_key=API_KEY) if API_KEY else None
-
-MODEL_NAME = os.getenv("MODEL_NAME", "zai-org/GLM-5.2")
+# BYOK Architecture: No global LLM clients or API keys are initialized here.
+# The system acts as a pure memory layer and dynamically builds isolated
+# clients per-request using the user's provided API key.
 
 # ============================================================
 # BYOK: Multi-Provider Registry
@@ -202,39 +193,15 @@ class DynamicOntology:
         self.concept_domains: Dict[str, str] = {}
         self.llm_enabled = True
 
-    async def get_features_llm(self, concept: str, context: str = "") -> Tuple[List[str], str]:
-        """Returns (features, domain)"""
-        if not openai_client:
-            return [concept], "general"
-        try:
-            response = openai_client.chat.completions.create(
-                model=MODEL_NAME,
-                messages=[
-                    {"role": "system", "content": "You are a helpful assistant. Extract features and classify the domain. Return format: 'DOMAIN: <domain> | FEATURES: <comma-separated list>'"},
-                    {"role": "user", "content": f"Extract up to 5 features and the domain for '{concept}'. Domain options: Agriculture, Technology, Finance, Geography, General."}
-                ],
-                temperature=0.3,
-                max_tokens=150
-            )
-            text = response.choices[0].message.content
-            domain = "general"
-            features = []
-            if "DOMAIN:" in text and "FEATURES:" in text:
-                domain_part = text.split("DOMAIN:")[1].split("|")[0].strip()
-                features_part = text.split("FEATURES:")[1].strip()
-                domain = domain_part
-                features = [f.strip().lower() for f in features_part.split(",")]
-            else:
-                features = [f.strip().lower() for f in text.split(",")]
-            return features[:5], domain.lower()
-        except Exception:
-            return [concept], "general"
+    # get_features_llm removed to enforce strict BYOK (0 background token usage)
 
     async def add_concept(self, concept: str, context: str = ""):
         concept_low = concept.lower()
         if concept_low in self.concept_to_features:
             return
-        features, domain = await self.get_features_llm(f"{context} {concept}" if context else concept)
+        # BYOK: Rely purely on offline dictionary mapping, no LLM calls
+        features = self.get_features(concept_low)
+        domain = self.get_domain(concept_low)
         self.concept_to_features[concept_low] = features
         self.concept_domains[concept_low] = domain
         for f in features:
@@ -1232,11 +1199,8 @@ class ConceptMemory:
         concept_list = []
         
         for kw in unique:
-            features = await ontology.get_features_llm(kw) if ontology.llm_enabled else (ontology.get_features(kw), "general")
-            if isinstance(features, tuple):
-                features, domain = features
-            else:
-                domain = "general"
+            features = ontology.get_features(kw)
+            domain = ontology.get_domain(kw)
             
             physical_fids = [self.feature_registry.register(f) for f in features]
             semantic_fids = [self.feature_registry.register(f) for f in features]
@@ -2241,7 +2205,7 @@ async def list_providers():
 
 def _build_client(req: AgentRequest):
     """Build an OpenAI-compatible client from the user's BYOK request.
-    Falls back to the global openai_client if no provider is specified."""
+    If no API key is provided, falls back to independent local graph mode."""
     if req.provider and req.api_key:
         provider_info = PROVIDER_REGISTRY.get(req.provider)
         if not provider_info:
@@ -2260,10 +2224,7 @@ def _build_client(req: AgentRequest):
         client = openai.OpenAI(base_url=base_url, api_key=req.api_key)
         return client, model, req.provider
     
-    # Fallback to global .env configuration
-    if openai_client:
-        return openai_client, MODEL_NAME, "default"
-    # Fallback to independent local graph mode
+    # Strict BYOK: No global fallback. Immediately fallback to independent local graph mode.
     return None, None, "local_graph"
 
 
@@ -2274,7 +2235,7 @@ async def agent_endpoint(req: AgentRequest):
     has a completely isolated memory within the shared graph database.
     
     BYOK: If provider and api_key are provided, creates a per-request LLM client.
-    Otherwise falls back to the server's default .env configuration."""
+    Otherwise elegantly falls back to the local independent graph mode without using tokens."""
     if not _env_ready or _api_env is None:
         raise HTTPException(status_code=503, detail="Environment not ready")
     
