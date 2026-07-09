@@ -1543,7 +1543,7 @@ class KnowledgeGraphEnv:
             return np.zeros(12)
 
     def _seed_initial_concepts(self):
-        if len(self.concept_memory.concepts) > 0:
+        if len(self.concept_memory.concepts) > 50:
             return
         
         # PHASE 1.1, 1.2: Seed with weighted, colored relationships
