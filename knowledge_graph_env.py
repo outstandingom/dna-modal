@@ -3,6 +3,7 @@ import json
 import asyncio
 import threading
 import time
+import math
 import pickle
 import random
 import numpy as np
@@ -1527,7 +1528,8 @@ class KnowledgeGraphEnv:
     def get_skill_vector_from_text(self, text: str) -> np.ndarray:
         """Full pipeline: text → 128-dim letter vec → projected 12-dim → SkillAdapter 12-dim output."""
         try:
-            seq = self.letter_vec.get_dna_sequence(text)  # use main 128-dim letter vecs
+            seq_list = [self.letter_vec.get(ch) for ch in text.lower() if ch in self.letter_vec.vec]
+            seq = np.array(seq_list) if seq_list else np.array([])
             if seq.shape[0] == 0:
                 embedding_128 = np.zeros(128)
             else:
