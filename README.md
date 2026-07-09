@@ -1,108 +1,88 @@
----
-title: Knowledge Graph Environment
-emoji: 🧠
-colorFrom: blue
-colorTo: indigo
-sdk: docker
-app_port: 7860
----
+# 🧬 DNA Knowledge Graph (GraphRAG Memory Layer)
 
-# Self‑Evolving Knowledge Graph Environment for Continuous Reasoning
+An advanced, token-efficient, dynamic "Memory Layer" that sits between your users and any Large Language Model (LLM). It completely replaces traditional Vector Database RAG by extracting semantic concepts, building relationship bonds, and injecting compressed, multi-hop reasoning into prompts.
 
-> *Think of it as a system that stores knowledge like a graph, learns continuously after deployment, and answers in milliseconds.*
+## 🌟 What is it?
+The DNA Knowledge Graph is a **Bring-Your-Own-Key (BYOK) middleware API**. 
+Instead of dumping raw paragraphs of text into a vector database (standard RAG) and wasting thousands of tokens, this engine actively *learns* during the conversation. It extracts pure concepts (e.g., `Apple`, `Red`, `Fruit`), establishes mathematical and semantic bonds (`Apple -> HAS_COLOR -> Red`), and stores them in a highly compressed 128-dimensional continuous vector space.
 
-> *Fast, memory‑efficient, and continuously learning – designed for real‑world customer support automation.*
+When a user asks a question, the graph intercepts the request, traverses the mathematical bonds to pull the exact logical context needed, and seamlessly forwards the enriched prompt to the LLM (using the user's own API key).
 
----
+## 🚀 Why Use This Instead of Standard RAG?
 
-## 🎯 What is this?
+While standard RAG (Vector Databases) is useful for retrieving exact quotes from massive legal PDFs, it fails miserably at reasoning and is incredibly expensive. Here is why the DNA Graph is the future of autonomous agent memory:
 
-A **reinforcement learning environment** that simulates customer support ticket triage.  
-An agent learns to:
+| Feature | Standard RAG (Vector DB) | DNA Knowledge Graph (GraphRAG) |
+| :--- | :--- | :--- |
+| **Token Efficiency** | ❌ **Terrible.** Stuffs raw, 500-word paragraphs into prompts full of filler words ("the", "and"). | ✅ **Perfect.** Injects highly compressed, structured concepts. Drastically reduces token usage and cost. |
+| **Reasoning** | ❌ **Dumb Search.** Matches text embeddings. Cannot connect logical dots if words aren't in the same paragraph. | ✅ **Multi-Hop Logic.** Can walk bonds (`A->B->C`) to answer complex deductive questions standard RAG fails at. |
+| **Dynamic Learning** | ❌ **Static.** Requires developers to manually embed and upload new documents. | ✅ **Organic.** Learns instantly during chat. Updates physical and semantic vectors dynamically like a human brain. |
+| **Offline Cost** | ❌ Requires paid embedding models to parse data. | ✅ **Zero-Token Background.** Uses a local offline `DynamicKnowledgeLoader` to map concepts for free. |
 
-1. **Identify** the main issue from a support ticket.
-2. **Relate** it to a known concept in a dynamic knowledge graph.
-3. **Answer** with a resolution action.
+## 🏗️ Architecture & Features
 
-Unlike static environments or large language models (LLMs), our system **maintains persistent memory of concepts and relationships** and **improves after deployment through continuous background updates** – without retraining.
+### 1. Strict BYOK (Bring Your Own Key) Middleware
+This engine operates strictly as a memory layer. It does not have global LLM API keys hardcoded into it, and it does not secretly consume tokens in the background to update its graph. 
+- It dynamically builds isolated LLM clients per-request using the `provider` and `api_key` sent by the frontend.
+- Supports **OpenAI, Google Gemini, Groq, DeepSeek, and HuggingFace**.
 
----
+### 2. Multi-Tenant Memory Isolation (`session_id`)
+You can host a single instance of this backend for a million users. When the frontend sends a request, it includes a unique UUID (`session_id`). The graph instantly creates a private, isolated namespace for that user (e.g., `user_123e4567:concept`). Users will perfectly resume their memory state across sessions, and memories are never cross-contaminated.
 
-## 🧠 Key Innovations (Why it’s different)
+### 3. Dual-Layer Vectors
+Concepts are stored using a biological DNA approach:
+- **Physical Features (12-dim):** Fast, immediate heuristic routing.
+- **Semantic Features (128-dim):** Deep, nuanced context understanding.
 
-| Feature | What it does | Why it matters |
-|---------|--------------|----------------|
-| **Persistent memory** | Stores concepts and relationships permanently | The agent never forgets past tickets |
-| **Continuous learning** | Background trainer updates vectors every 10 seconds | The system gets smarter over time, even after deployment |
-| **DNA‑inspired encoding** | Each concept is built from structured combinations of simple components (letters A–Z), enabling compact and composable representations. Compact 16‑dim vectors. | Very low memory (~150 MB for 1000 concepts) and fast (<1 ms query) |
-| **Reasoning engine** | Multi‑hop graph propagation + analogical reasoning | Can answer complex queries like “A is to B as C is to ?” |
-| **Deterministic grading** | Clear reward rules (exact match → 1.0, partial → 0.7/0.3) | Judges can reproduce scores 100% of the time |
-
----
-
-## ⚙️ How It Works (simple version)
-
-1. **Input** – a support ticket (e.g., *“I can’t log in”*)
-2. **Feature extraction** – keywords become features (e.g., “login”, “password”)
-3. **DNA encoding** – each feature maps to a sequence of letters (A–Z) with learnable vectors; a concept vector is the sum of its features’ encodings. *DNA‑inspired encoding means each concept is built from structured combinations of simple components (letters A–Z), enabling compact and composable representations.*
-4. **Knowledge graph** – concepts are nodes; relationships are edges. When two concepts are linked, their vectors move closer – the whole graph learns.
-5. **Reasoning** – FAISS search (similarity) + multi‑hop activation + analogical arithmetic.
-6. **Reward** – deterministic scoring based on exact match, substring, or word overlap (0.0 / 0.3 / 0.7 / 1.0).
+### 4. Single Orchestrator Architecture
+The frontend only ever has to talk to two endpoints:
+- `POST /agent`: Handles chat, intercepts memory, and forwards to the LLM.
+- `GET /graph`: A single orchestrator endpoint that sweeps the brain and accurately returns every node and bond (with weight and color) for real-time 3D UI rendering.
 
 ---
 
-## 📊 OpenEnv Tasks (3 independent graders)
+## 💻 How to Use in an Existing Project
 
-| Task | Difficulty | Description | Example input | Expected output |
-|------|------------|-------------|---------------|-----------------|
-| `task_easy` | Easy | Identify the main concept | *“Login not working”* | `login issue` |
-| `task_medium` | Medium | Find the correct relation | *“Bill is wrong”* | `refund` |
-| `task_hard` | Hard | Provide the resolution | *“Locked out after failed payment”* | `reset password` |
+You can use this backend to supercharge the memory of *any* frontend app (React, iOS, Discord Bot).
 
-All graders are **deterministic** and return a score between 0.0 and 1.0.
-
----
-
-## ⚡ Performance (on 2 vCPU / 8GB)
-
-| Metric | Value |
-|--------|-------|
-| Latency per step | < 1 ms |
-| Full episode (3 steps) | < 5 ms |
-| Memory for 1,000 concepts | ~150 MB |
-| Determinism | 100% (same input → same score) |
-| Scalability | Up to 100,000 concepts with < 2 ms search |
+1. Spin up this Python FastAPI server.
+2. In your frontend, when a user types a message, make a POST request to `/agent`:
+```javascript
+const response = await fetch('https://your-dna-backend.com/agent', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    message: "My favorite color is Blue, and I live in Kashmir.",
+    session_id: "user-uuid-1234", // Isolates their memory
+    provider: "gemini",           // User's chosen LLM
+    api_key: "AIzaSy..."          // User's API Key
+  })
+});
+```
+3. The graph instantly extracts `Favorite Color: Blue` and `Location: Kashmir`, binds them to the user, and returns the smart LLM response. 
 
 ---
 
-## 🔄 Comparison with LLMs (balanced view)
+## ☁️ Deployment Guide (Testing & Production)
 
-| Aspect | LLM‑based approach | Our environment |
-|--------|--------------------|-----------------|
-| **Memory** | Context window only; external DB needed | Persistent graph, built‑in |
-| **Latency** | Seconds | Microseconds |
-| **Cost** | API or GPU | Zero (CPU only) |
-| **Learning after deployment** | Expensive fine‑tuning | Automatic background updates |
-| **Best for** | General reasoning, creative generation | Structured, repetitive, fast queries |
+Because the graph saves its organic memory state to local `.pkl` files (e.g., `brain_state.pkl`), you must host it on a server with **persistent storage**. Serverless environments (like Vercel functions or AWS Lambda) will wipe the memory.
 
-> *We do not claim to replace LLMs – we provide a complementary solution for tasks that require low latency, persistent memory, and incremental learning.*
+### Option 1: DigitalOcean Droplet / AWS EC2 (Recommended)
+The absolute best way to host this. The IP is static and the local hard drive guarantees your memory files are never wiped.
+1. Create an Ubuntu Server.
+2. SSH into the server and clone this repo.
+3. Install dependencies: `sudo apt install python3-pip python3-venv`
+4. Setup environment: `python3 -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt`
+5. Run it forever: `nohup uvicorn knowledge_graph_env:app --host 0.0.0.0 --port 7860 > api.log 2>&1 &`
 
----
+### Option 2: Render (Free Tier - No Credit Card)
+If you want to test it completely for free:
+1. Connect your GitHub to Render.com and create a new **Web Service**.
+2. Point it to this repo.
+3. Start Command: `uvicorn knowledge_graph_env:app --host 0.0.0.0 --port 10000`
+4. *Warning:* Render's free tier sleeps after 15 minutes of inactivity. When it wakes up, temporary storage is wiped. However, thanks to our `DynamicKnowledgeLoader`, the base ontology will perfectly restore itself! (User-specific session memories will be lost on the free tier unless you upgrade to a paid disk).
 
-## 🚀 Real‑World Use Cases
-
-- **Customer support ticket routing** – learn new issues continuously.
-- **Enterprise knowledge management** – keep a living graph of documents.
-- **Educational tutoring systems** – track student misconceptions.
-- **Legal case law analysis** – link new precedents to old rulings.
-
----
-
-## 🛠️ How to Run
-
-### Locally
-```bash
-git clone https://github.com/outstandingom/dna-modal.git
-cd dna-modal
-pip install -r requirements.txt
-python inference.py
+### Option 3: Hugging Face Spaces (Free)
+1. Create a new "Docker Space".
+2. Upload this code.
+3. Hugging Face handles the rest. (Requires setting up persistent storage in their settings to keep `.pkl` files).
