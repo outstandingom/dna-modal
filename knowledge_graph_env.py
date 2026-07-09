@@ -1475,6 +1475,9 @@ class KnowledgeGraphEnv:
         self.predictive_reasoning = ReasoningEngine(self.predictive_concept_memory, self.predictive_feature_registry, self.predictive_letter_vec)
         self.reasoning_engine.predictive_fallback = self.predictive_reasoning
         
+        # ── Dynamic Knowledge Loader ──
+        self.knowledge_loader = DynamicKnowledgeLoader()
+        
         self._seed_initial_concepts()
         self.trainer: Optional[ContinuousTrainer] = None
         if start_trainer:
@@ -1488,9 +1491,6 @@ class KnowledgeGraphEnv:
         # ── Projection Layer: 128-dim brain ↔ 12-dim judge ──
         self.projector = DimensionProjector(persist_path=os.path.join(PERSIST_DIR, "projection.pkl"))
         self.projection_cache = ProjectionCache(max_size=10000)
-        
-        # ── Dynamic Knowledge Loader ──
-        self.knowledge_loader = DynamicKnowledgeLoader()
         
         # Train projector once concepts are available
         self._train_projector()
