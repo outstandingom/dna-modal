@@ -1482,6 +1482,18 @@ class KnowledgeGraphEnv:
         self.projection_cache.set(concept_name, projected)
         return projected
 
+    def get_concept_vector_from_text(self, text: str) -> np.ndarray:
+        """Returns the raw 128-dimensional concept vector for semantic search."""
+        try:
+            seq_list = [self.letter_vec.get(ch) for ch in text.lower() if ch in self.letter_vec.vec]
+            seq = np.array(seq_list) if seq_list else np.array([])
+            if seq.shape[0] == 0:
+                return np.zeros(128)
+            return np.mean(seq, axis=0)
+        except Exception as e:
+            print(f"[VECTOR WARN] Could not compute concept vector: {e}")
+            return np.zeros(128)
+
     def get_skill_vector_from_text(self, text: str) -> np.ndarray:
         """Full pipeline: text → 128-dim letter vec → projected 12-dim → SkillAdapter 12-dim output."""
         try:
@@ -2461,7 +2473,7 @@ async def agent_endpoint(req: AgentRequest):
                 
                 # Semantic search fallback if exact node not found
                 if not res:
-                    query_vec = _api_env.get_skill_vector_from_text(raw_concept)
+                    query_vec = _api_env.get_concept_vector_from_text(raw_concept)
                     semantic_results = _api_env.concept_memory.partitioned_search(query_vec, top_k=5, partition=slice(None))
                     
                     if ns:
@@ -2515,7 +2527,7 @@ async def agent_endpoint(req: AgentRequest):
                 
                 # Semantic search fallback if exact node not found
                 if not res:
-                    query_vec = _api_env.get_skill_vector_from_text(raw_concept)
+                    query_vec = _api_env.get_concept_vector_from_text(raw_concept)
                     semantic_results = _api_env.concept_memory.partitioned_search(query_vec, top_k=5, partition=slice(None))
                     
                     if ns:
