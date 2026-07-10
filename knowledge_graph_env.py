@@ -1485,11 +1485,12 @@ class KnowledgeGraphEnv:
     def get_concept_vector_from_text(self, text: str) -> np.ndarray:
         """Returns the raw 128-dimensional concept vector for semantic search."""
         try:
-            seq_list = [self.letter_vec.get(ch) for ch in text.lower() if ch in self.letter_vec.vec]
-            seq = np.array(seq_list) if seq_list else np.array([])
-            if seq.shape[0] == 0:
-                return np.zeros(128)
-            return np.mean(seq, axis=0)
+            features = self.ontology.get_features(text.lower())
+            physical_fids = [self.feature_registry.register(f) for f in features]
+            semantic_fids = [self.feature_registry.register(f) for f in features]
+            temp_concept = DNAConcept(text.lower(), physical_fids, semantic_fids,
+                                      self.feature_registry, self.letter_vec, dims=128)
+            return temp_concept.vector if temp_concept.vector is not None else np.zeros(128)
         except Exception as e:
             print(f"[VECTOR WARN] Could not compute concept vector: {e}")
             return np.zeros(128)
