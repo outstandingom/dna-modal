@@ -2465,27 +2465,37 @@ async def agent_endpoint(req: AgentRequest):
             
             tool_result = ""
             if function_name == "search_graph":
-                raw_concept = function_args.get("concept", "")
-                namespaced_concept = f"{ns}{raw_concept}" if ns else raw_concept
-                res = _api_env.reasoning_engine.multi_hop_reasoning(namespaced_concept, max_hops=2)
+                raw_concept = function_args.get("concept", "").lower()
                 
-                if res and ns:
-                    res = {k.replace(ns, "") if k.startswith(ns) else k: v for k, v in res.items()}
-                
-                # Semantic search fallback if exact node not found
-                if not res:
-                    query_vec = _api_env.get_concept_vector_from_text(raw_concept)
-                    semantic_results = _api_env.concept_memory.partitioned_search(query_vec, top_k=5, partition=slice(None))
+                # Alias common queries to the central identity anchor
+                if raw_concept in ["who am i", "my name", "name", "identity", "who are you", "me"]:
+                    raw_concept = "identity"
                     
-                    if ns:
-                        semantic_results = [r for r in semantic_results if r[0].startswith(ns)]
-                        
-                    res = {}
-                    for name, score in semantic_results:
-                        if score > 0.4:  # Similarity threshold
-                            display_name = name.replace(ns, "") if ns else name
-                            rels = _api_env.concept_memory.weighted_relationships.get(name, {})
-                            res[display_name] = [t.replace(ns, "") if ns else t for t in rels.keys()]
+                words = [w for w in raw_concept.split() if len(w) > 1 and w not in STOP_WORDS]
+                if not words:
+                    words = [raw_concept]
+                
+                res = {}
+                for w in words:
+                    namespaced = f"{ns}{w}" if ns else w
+                    w_res = _api_env.reasoning_engine.multi_hop_reasoning(namespaced, max_hops=2)
+                    if w_res and ns:
+                        w_res = {k.replace(ns, "") if k.startswith(ns) else k: v for k, v in w_res.items()}
+                    if w_res:
+                        res.update(w_res)
+                
+                # Semantic search fallback if exact nodes not found
+                if not res:
+                    for w in words:
+                        query_vec = _api_env.get_concept_vector_from_text(w)
+                        semantic_results = _api_env.concept_memory.partitioned_search(query_vec, top_k=3, partition=slice(None))
+                        if ns:
+                            semantic_results = [r for r in semantic_results if r[0].startswith(ns)]
+                        for name, score in semantic_results:
+                            if score > 0.4:
+                                display_name = name.replace(ns, "") if ns else name
+                                rels = _api_env.concept_memory.weighted_relationships.get(name, {})
+                                res[display_name] = [t.replace(ns, "") if ns else t for t in rels.keys()]
                             
                 tool_result = json.dumps(res)
             elif function_name == "extract_and_learn":
@@ -2519,27 +2529,37 @@ async def agent_endpoint(req: AgentRequest):
             
             tool_result = ""
             if function_name == "search_graph":
-                raw_concept = function_args.get("concept", "")
-                namespaced_concept = f"{ns}{raw_concept}" if ns else raw_concept
-                res = _api_env.reasoning_engine.multi_hop_reasoning(namespaced_concept, max_hops=2)
+                raw_concept = function_args.get("concept", "").lower()
                 
-                if res and ns:
-                    res = {k.replace(ns, "") if k.startswith(ns) else k: v for k, v in res.items()}
-                
-                # Semantic search fallback if exact node not found
-                if not res:
-                    query_vec = _api_env.get_concept_vector_from_text(raw_concept)
-                    semantic_results = _api_env.concept_memory.partitioned_search(query_vec, top_k=5, partition=slice(None))
+                # Alias common queries to the central identity anchor
+                if raw_concept in ["who am i", "my name", "name", "identity", "who are you", "me"]:
+                    raw_concept = "identity"
                     
-                    if ns:
-                        semantic_results = [r for r in semantic_results if r[0].startswith(ns)]
-                        
-                    res = {}
-                    for name, score in semantic_results:
-                        if score > 0.4:  # Similarity threshold
-                            display_name = name.replace(ns, "") if ns else name
-                            rels = _api_env.concept_memory.weighted_relationships.get(name, {})
-                            res[display_name] = [t.replace(ns, "") if ns else t for t in rels.keys()]
+                words = [w for w in raw_concept.split() if len(w) > 1 and w not in STOP_WORDS]
+                if not words:
+                    words = [raw_concept]
+                
+                res = {}
+                for w in words:
+                    namespaced = f"{ns}{w}" if ns else w
+                    w_res = _api_env.reasoning_engine.multi_hop_reasoning(namespaced, max_hops=2)
+                    if w_res and ns:
+                        w_res = {k.replace(ns, "") if k.startswith(ns) else k: v for k, v in w_res.items()}
+                    if w_res:
+                        res.update(w_res)
+                
+                # Semantic search fallback if exact nodes not found
+                if not res:
+                    for w in words:
+                        query_vec = _api_env.get_concept_vector_from_text(w)
+                        semantic_results = _api_env.concept_memory.partitioned_search(query_vec, top_k=3, partition=slice(None))
+                        if ns:
+                            semantic_results = [r for r in semantic_results if r[0].startswith(ns)]
+                        for name, score in semantic_results:
+                            if score > 0.4:
+                                display_name = name.replace(ns, "") if ns else name
+                                rels = _api_env.concept_memory.weighted_relationships.get(name, {})
+                                res[display_name] = [t.replace(ns, "") if ns else t for t in rels.keys()]
                             
                 tool_result = json.dumps(res)
             elif function_name == "extract_and_learn":
