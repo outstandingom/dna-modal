@@ -2095,8 +2095,8 @@ async def get_graph_endpoint():
     for name, concept in _api_env.concept_memory.concepts.items():
         nodes.append({
             "id": name,
-            "domain": concept.domain,
-            "importance": concept.importance
+            "domain": getattr(concept, "domain", "general"),
+            "importance": getattr(concept, "importance", 1.0)
         })
         
     # 2. Add all bonded relationships (links)
