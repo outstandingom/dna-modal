@@ -2083,25 +2083,38 @@ async def list_concepts_endpoint(limit: int = 100):
     return {"concepts": concepts, "total": len(_api_env.concept_memory.concepts)}
 
 @app.get("/graph")
-async def get_graph_endpoint():
-    """Return the entire knowledge graph for visualization."""
+async def get_graph_endpoint(session_id: Optional[str] = None):
+    """Return the entire knowledge graph for visualization, filtered by session_id if provided."""
     if _api_env is None:
         raise HTTPException(status_code=503, detail="Environment still initializing.")
     
     nodes = []
     links = []
+    ns = f"user_{session_id[:8]}:" if session_id else ""
     
     # 1. Add all nodes
     for name, concept in _api_env.concept_memory.concepts.items():
+        if ns and not name.startswith(ns):
+            continue
+            
+        display_name = name.replace(ns, "") if ns else name
         nodes.append({
-            "id": name,
+            "id": display_name,
             "domain": getattr(concept, "domain", "general"),
             "importance": getattr(concept, "importance", 1.0)
         })
         
     # 2. Add all bonded relationships (links)
     for source, targets in _api_env.concept_memory.weighted_relationships.items():
+        if ns and not source.startswith(ns):
+            continue
+        display_source = source.replace(ns, "") if ns else source
+        
         for target, rel_data in targets.items():
+            if ns and not target.startswith(ns):
+                continue
+            display_target = target.replace(ns, "") if ns else target
+            
             if isinstance(rel_data, tuple) and len(rel_data) == 2:
                 weight, color = rel_data
             else:
@@ -2109,8 +2122,8 @@ async def get_graph_endpoint():
                 color = getattr(rel_data, "relation_type", "RELATED")
                 
             links.append({
-                "source": source,
-                "target": target,
+                "source": display_source,
+                "target": display_target,
                 "weight": weight,
                 "color": color
             })
@@ -2429,6 +2442,22 @@ async def agent_endpoint(req: AgentRequest):
                 raw_concept = function_args.get("concept", "")
                 namespaced_concept = f"{ns}{raw_concept}" if ns else raw_concept
                 res = _api_env.reasoning_engine.multi_hop_reasoning(namespaced_concept, max_hops=2)
+                
+                # Semantic search fallback if exact node not found
+                if not res:
+                    query_vec = _api_env.get_skill_vector_from_text(raw_concept)
+                    semantic_results = _api_env.concept_memory.partitioned_search(query_vec, top_k=5, partition=slice(None))
+                    
+                    if ns:
+                        semantic_results = [r for r in semantic_results if r[0].startswith(ns)]
+                        
+                    res = {}
+                    for name, score in semantic_results:
+                        if score > 0.4:  # Similarity threshold
+                            display_name = name.replace(ns, "") if ns else name
+                            rels = _api_env.concept_memory.weighted_relationships.get(name, {})
+                            res[display_name] = [t.replace(ns, "") if ns else t for t in rels.keys()]
+                            
                 tool_result = json.dumps(res)
             elif function_name == "extract_and_learn":
                 raw_text = function_args.get("text", "")
@@ -2465,6 +2494,22 @@ async def agent_endpoint(req: AgentRequest):
                 raw_concept = function_args.get("concept", "")
                 namespaced_concept = f"{ns}{raw_concept}" if ns else raw_concept
                 res = _api_env.reasoning_engine.multi_hop_reasoning(namespaced_concept, max_hops=2)
+                
+                # Semantic search fallback if exact node not found
+                if not res:
+                    query_vec = _api_env.get_skill_vector_from_text(raw_concept)
+                    semantic_results = _api_env.concept_memory.partitioned_search(query_vec, top_k=5, partition=slice(None))
+                    
+                    if ns:
+                        semantic_results = [r for r in semantic_results if r[0].startswith(ns)]
+                        
+                    res = {}
+                    for name, score in semantic_results:
+                        if score > 0.4:  # Similarity threshold
+                            display_name = name.replace(ns, "") if ns else name
+                            rels = _api_env.concept_memory.weighted_relationships.get(name, {})
+                            res[display_name] = [t.replace(ns, "") if ns else t for t in rels.keys()]
+                            
                 tool_result = json.dumps(res)
             elif function_name == "extract_and_learn":
                 raw_text = function_args.get("text", "")
