@@ -2228,26 +2228,26 @@ async def list_providers():
 def _build_client(req: AgentRequest):
     """Build an OpenAI-compatible client from the user's BYOK request.
     If no API key is provided, falls back to independent local graph mode."""
-    if req.provider and req.api_key:
-        provider_info = PROVIDER_REGISTRY.get(req.provider)
-        if not provider_info:
-            raise HTTPException(status_code=400, detail=f"Unknown provider: {req.provider}. Use /providers to see supported options.")
-        
-        base_url = req.custom_base_url if req.provider == "custom" else provider_info["base_url"]
-        if not base_url:
-            raise HTTPException(status_code=400, detail="Custom provider requires a base_url.")
-        
-        model = req.model or provider_info["default_model"]
-        
-        # Safeguard: Auto-upgrade decommissioned Groq model from old frontend cache
-        if req.provider == "groq" and model == "llama-3.1-70b-versatile":
-            model = "llama-3.3-70b-versatile"
-            
-        client = openai.OpenAI(base_url=base_url, api_key=req.api_key)
-        return client, model, req.provider
+    # Independent mode: always fall back to local graph, no LLM needed
+    if not req.provider or req.provider == "local_graph" or not req.api_key:
+        return None, None, "local_graph"
     
-    # Strict BYOK: No global fallback. Immediately fallback to independent local graph mode.
-    return None, None, "local_graph"
+    provider_info = PROVIDER_REGISTRY.get(req.provider)
+    if not provider_info:
+        raise HTTPException(status_code=400, detail=f"Unknown provider: {req.provider}. Use /providers to see supported options.")
+    
+    base_url = req.custom_base_url if req.provider == "custom" else provider_info["base_url"]
+    if not base_url:
+        raise HTTPException(status_code=400, detail="Custom provider requires a base_url.")
+    
+    model = req.model or provider_info["default_model"]
+    
+    # Safeguard: Auto-upgrade decommissioned Groq model from old frontend cache
+    if req.provider == "groq" and model == "llama-3.1-70b-versatile":
+        model = "llama-3.3-70b-versatile"
+        
+    client = openai.OpenAI(base_url=base_url, api_key=req.api_key)
+    return client, model, req.provider
 
 
 @app.post("/agent", response_model=AgentResponse)
@@ -2321,59 +2321,65 @@ async def agent_endpoint(req: AgentRequest):
         learned = _api_env.extract_and_learn(req.message, ns)
         learned_concepts = learned.get("extracted_concepts", [])
         
+        # ── CORE: Search identity anchor for all connected knowledge ──
+        anchor_name = f"{ns}identity" if ns else None
+        connected_knowledge = {}
+        if anchor_name and anchor_name in _api_env.concept_memory.weighted_relationships:
+            for target, rel_data in _api_env.concept_memory.weighted_relationships[anchor_name].items():
+                display_name = target.replace(ns, "") if ns else target
+                weight = getattr(rel_data, "weight", 1.0)
+                color = getattr(rel_data, "relation_type", getattr(rel_data, "color", "RELATED"))
+                connected_knowledge[display_name] = {"weight": weight, "type": color}
+        
+        # ── Multi-hop reasoning from user's input words ──
+        graph_results = {}
+        for concept_name in learned_concepts:
+            hop_res = _api_env.reasoning_engine.multi_hop_reasoning(concept_name, max_hops=2)
+            if hop_res and ns:
+                hop_res = {k.replace(ns, "") if k.startswith(ns) else k: v for k, v in hop_res.items()}
+            for k, v in hop_res.items():
+                if k not in graph_results or v > graph_results[k]:
+                    graph_results[k] = v
+        
+        # ── Vector similarity search ──
         essence_results = []
         identity_results = []
-        
         for concept_name in learned_concepts:
             if concept_name in _api_env.concept_memory.concepts:
                 vec = _api_env.concept_memory.concepts[concept_name].vector
-                
-                # 1. Physical features (Essence)
                 e_res = _api_env.concept_memory.partitioned_search(vec, partition=ESSENCE_DIMS, top_k=3)
                 for name, score in e_res:
-                    if name != concept_name and not any(r['concept'] == name for r in essence_results):
-                        essence_results.append({"concept": name, "score": score})
-                        
-                # 2. Semantic features (Identity)
+                    display = name.replace(ns, "") if ns else name
+                    if display != concept_name.replace(ns, "") and not any(r['concept'] == display for r in essence_results):
+                        essence_results.append({"concept": display, "score": score})
                 i_res = _api_env.concept_memory.partitioned_search(vec, partition=IDENTITY_DIMS, top_k=3)
                 for name, score in i_res:
-                    if name != concept_name and not any(r['concept'] == name for r in identity_results):
-                        identity_results.append({"concept": name, "score": score})
+                    display = name.replace(ns, "") if ns else name
+                    if display != concept_name.replace(ns, "") and not any(r['concept'] == display for r in identity_results):
+                        identity_results.append({"concept": display, "score": score})
         
-        # 3. 12-dim predictive submodel
-        predictions = _api_env.predictive_reasoning.multi_hop_reasoning(req.message.lower(), max_hops=2)
-        
-        # 4. Generate local sentence using highest similarity concept
-        generated_sentence = ""
-        top_concept = None
-        if essence_results:
-            top_concept = essence_results[0]['concept']
-        elif identity_results:
-            top_concept = identity_results[0]['concept']
-            
-        if top_concept:
-            generated_sentence = _api_env.generate_sentence(top_concept)
-        
-        # Build response
+        # ── Build human-readable response ──
         parts = ["🧠 **DNA Graph Analysis** (Independent Mode)\n"]
         
+        if connected_knowledge:
+            knowledge_items = sorted(connected_knowledge.keys())
+            parts.append(f"🔗 **Your Memory** ({len(connected_knowledge)} connected nodes): {', '.join(knowledge_items)}")
+        
+        if graph_results:
+            top_graph = sorted(graph_results.items(), key=lambda x: x[1], reverse=True)[:8]
+            parts.append(f"🌐 **Graph Traversal**: {', '.join(f'{k} ({v:.1%})' for k, v in top_graph)}")
+        
         if learned_concepts:
-            parts.append(f"📚 **Learned**: {', '.join(learned_concepts[:8])}")
+            display_learned = [c.replace(ns, "") if ns else c for c in learned_concepts[:8]]
+            parts.append(f"📚 **Learned**: {', '.join(display_learned)}")
             
         if essence_results:
-            parts.append(f"🔬 **Related Features (Essence)**: {', '.join(r['concept'] for r in essence_results[:3])}")
+            parts.append(f"🔬 **Related Features**: {', '.join(r['concept'] for r in essence_results[:3])}")
             
         if identity_results:
             parts.append(f"🧬 **Related Identity**: {', '.join(r['concept'] for r in identity_results[:3])}")
-            
-        if predictions:
-            top_preds = list(predictions.keys())[:5]
-            parts.append(f"🔮 **Vector Predictions**: {', '.join(top_preds)}")
-            
-        if generated_sentence:
-            parts.append(f"\n💡 **Feature Output**: {generated_sentence}")
-            
-        if not (learned_concepts or essence_results or identity_results or predictions):
+        
+        if not (connected_knowledge or graph_results or learned_concepts):
             parts.append("- I absorbed your input, but I don't have enough vector connections to formulate a deep thought about it yet.")
             
         response_text = "\n".join(parts)
