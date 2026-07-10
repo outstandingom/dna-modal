@@ -130,14 +130,7 @@ PROVIDER_REGISTRY = {
     }
 }
 
-STOP_WORDS = {
-    "the", "and", "for", "are", "but", "not", "you", "all", "can", "had",
-    "her", "was", "one", "our", "out", "has", "have", "from", "they", "been",
-    "said", "each", "which", "their", "will", "other", "about", "many", "then",
-    "them", "these", "some", "would", "make", "like", "into", "time", "very",
-    "when", "come", "could", "than", "its", "also", "back", "after", "two",
-    "how", "what", "where", "who", "why", "this", "that", "with",
-}
+STOP_WORDS = set()
 
 # Relationship color/label constants (PHASE 1.2)
 class RelationshipColor(Enum):
@@ -1756,6 +1749,15 @@ class KnowledgeGraphEnv:
         words = [w for w in text.lower().split() if len(w) > 1 and w not in STOP_WORDS]
         unique = list(set(words))[:15]
         extracted = []
+        
+        anchor_name = None
+        if namespace:
+            anchor_name = f"{namespace}identity"
+            if anchor_name not in self.concept_memory.concepts:
+                features = self.ontology.get_features("identity")
+                physical_fids = [self.feature_registry.register(f) for f in features]
+                semantic_fids = [self.feature_registry.register(f) for f in features]
+                self.concept_memory.register(anchor_name, physical_fids, semantic_fids, importance=2.0, domain="user_identity")
 
         for kw in unique:
             name = f"{namespace}{kw}" if namespace else kw
@@ -1771,6 +1773,11 @@ class KnowledgeGraphEnv:
                 self.predictive_concept_memory.register(name, p_phys, p_sem,
                                                         importance=1.0, domain="general")
             extracted.append(name)
+            
+            # Centralize graph by bonding to anchor
+            if anchor_name and name != anchor_name:
+                self.concept_memory.add_weighted_relationship(anchor_name, name, weight=1.0, color="HAS")
+                self.concept_memory.add_weighted_relationship(name, anchor_name, weight=1.0, color="PART_OF")
 
         # Create relationships between co-occurring concepts
         for i in range(len(extracted)):
@@ -2461,8 +2468,7 @@ async def agent_endpoint(req: AgentRequest):
                 tool_result = json.dumps(res)
             elif function_name == "extract_and_learn":
                 raw_text = function_args.get("text", "")
-                namespaced_text = f"[{ns}] {raw_text}" if ns else raw_text
-                res = await _api_env.concept_memory.extract_and_link(namespaced_text, _api_env.ontology)
+                res = _api_env.extract_and_learn(raw_text, namespace=ns)
                 tool_result = json.dumps(res)
             
             if tool_result:
@@ -2513,9 +2519,7 @@ async def agent_endpoint(req: AgentRequest):
                 tool_result = json.dumps(res)
             elif function_name == "extract_and_learn":
                 raw_text = function_args.get("text", "")
-                # Prepend the namespace as context so all extracted concepts get the user prefix
-                namespaced_text = f"[{ns}] {raw_text}" if ns else raw_text
-                res = await _api_env.concept_memory.extract_and_link(namespaced_text, _api_env.ontology)
+                res = _api_env.extract_and_learn(raw_text, namespace=ns)
                 tool_result = json.dumps(res)
             else:
                 tool_result = "Tool not found"
