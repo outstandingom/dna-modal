@@ -2391,6 +2391,66 @@ async def agent_endpoint(req: AgentRequest):
     tool_calls = response_message.tool_calls
     executed_tools = []
     
+    # ── FALLBACK: Parse tool calls from text output ──────────────
+    # Some LLMs (e.g. Llama on Groq) output tool calls as raw JSON text
+    # instead of using the native tool_calls format. Detect and handle this.
+    if not tool_calls and response_message.content:
+        content = response_message.content.strip()
+        parsed_tool = None
+        try:
+            # Try to parse direct JSON: {"type":"function","name":"...","parameters":{...}}
+            candidate = json.loads(content)
+            if isinstance(candidate, dict) and "name" in candidate:
+                parsed_tool = candidate
+        except (json.JSONDecodeError, ValueError):
+            pass
+        
+        if not parsed_tool:
+            # Try to extract JSON from markdown code blocks or mixed text
+            import re
+            json_match = re.search(r'\{[^{}]*"name"\s*:\s*"(?:search_graph|extract_and_learn)"[^{}]*\}', content)
+            if json_match:
+                try:
+                    parsed_tool = json.loads(json_match.group())
+                except (json.JSONDecodeError, ValueError):
+                    pass
+        
+        if parsed_tool:
+            function_name = parsed_tool.get("name", "")
+            function_args = parsed_tool.get("parameters", parsed_tool.get("arguments", {}))
+            if isinstance(function_args, str):
+                try:
+                    function_args = json.loads(function_args)
+                except:
+                    function_args = {}
+            
+            tool_result = ""
+            if function_name == "search_graph":
+                raw_concept = function_args.get("concept", "")
+                namespaced_concept = f"{ns}{raw_concept}" if ns else raw_concept
+                res = _api_env.reasoning_engine.multi_hop_reasoning(namespaced_concept, max_hops=2)
+                tool_result = json.dumps(res)
+            elif function_name == "extract_and_learn":
+                raw_text = function_args.get("text", "")
+                namespaced_text = f"[{ns}] {raw_text}" if ns else raw_text
+                res = await _api_env.concept_memory.extract_and_link(namespaced_text, _api_env.ontology)
+                tool_result = json.dumps(res)
+            
+            if tool_result:
+                executed_tools.append({"tool": function_name, "result": tool_result})
+                # Send tool result back to LLM for a human-readable summary
+                messages.append({"role": "assistant", "content": content})
+                messages.append({"role": "user", "content": f"Tool '{function_name}' returned: {tool_result}\n\nNow give a clear, human-readable summary of what happened. Do NOT output any JSON or function calls."})
+                try:
+                    final_response = client.chat.completions.create(
+                        model=model_name,
+                        messages=messages
+                    )
+                    return AgentResponse(response=final_response.choices[0].message.content, tool_calls=executed_tools, provider_used=provider_used)
+                except Exception as e:
+                    return AgentResponse(response=f"Graph updated with tool '{function_name}', but summary generation failed: {e}", tool_calls=executed_tools, provider_used=provider_used)
+    
+    # ── NATIVE: Handle proper tool_calls from the LLM ───────────
     if tool_calls:
         messages.append(response_message)
         for tool_call in tool_calls:
