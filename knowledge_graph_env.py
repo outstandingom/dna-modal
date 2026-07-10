@@ -1194,7 +1194,7 @@ class ConceptMemory:
 
     async def extract_and_link(self, text: str, ontology: DynamicOntology, 
                                 sector: str = "general") -> List[str]:
-        words = [w for w in text.lower().split() if len(w) > 3 and w not in STOP_WORDS]
+        words = [w for w in text.lower().split() if len(w) > 1 and w not in STOP_WORDS]
         unique = list(set(words))[:15]
         concept_list = []
         
@@ -1753,7 +1753,7 @@ class KnowledgeGraphEnv:
     def extract_and_learn(self, text: str, namespace: str = "") -> dict:
         """Extract concepts from text and learn them into both 128-dim and 12-dim graphs.
         Returns dict with extracted_concepts list."""
-        words = [w for w in text.lower().split() if len(w) > 3 and w not in STOP_WORDS]
+        words = [w for w in text.lower().split() if len(w) > 1 and w not in STOP_WORDS]
         unique = list(set(words))[:15]
         extracted = []
 
