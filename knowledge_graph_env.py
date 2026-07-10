@@ -2102,11 +2102,17 @@ async def get_graph_endpoint():
     # 2. Add all bonded relationships (links)
     for source, targets in _api_env.concept_memory.weighted_relationships.items():
         for target, rel_data in targets.items():
+            if isinstance(rel_data, tuple) and len(rel_data) == 2:
+                weight, color = rel_data
+            else:
+                weight = getattr(rel_data, "weight", 1.0)
+                color = getattr(rel_data, "relation_type", "RELATED")
+                
             links.append({
                 "source": source,
                 "target": target,
-                "weight": rel_data.weight,
-                "color": rel_data.relation_type
+                "weight": weight,
+                "color": color
             })
             
     return {"nodes": nodes, "links": links}
