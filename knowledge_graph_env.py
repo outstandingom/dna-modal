@@ -2450,6 +2450,9 @@ async def agent_endpoint(req: AgentRequest):
                 namespaced_concept = f"{ns}{raw_concept}" if ns else raw_concept
                 res = _api_env.reasoning_engine.multi_hop_reasoning(namespaced_concept, max_hops=2)
                 
+                if res and ns:
+                    res = {k.replace(ns, "") if k.startswith(ns) else k: v for k, v in res.items()}
+                
                 # Semantic search fallback if exact node not found
                 if not res:
                     query_vec = _api_env.get_skill_vector_from_text(raw_concept)
@@ -2500,6 +2503,9 @@ async def agent_endpoint(req: AgentRequest):
                 raw_concept = function_args.get("concept", "")
                 namespaced_concept = f"{ns}{raw_concept}" if ns else raw_concept
                 res = _api_env.reasoning_engine.multi_hop_reasoning(namespaced_concept, max_hops=2)
+                
+                if res and ns:
+                    res = {k.replace(ns, "") if k.startswith(ns) else k: v for k, v in res.items()}
                 
                 # Semantic search fallback if exact node not found
                 if not res:
