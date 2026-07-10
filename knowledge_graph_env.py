@@ -2370,9 +2370,13 @@ async def agent_endpoint(req: AgentRequest):
             tool_choice="auto"
         )
     except Exception as e:
-        # If external LLM fails (e.g. rate limit, balance, decommissioned), fallback gracefully!
-        print(f"External LLM Failed: {e}. Falling back to Independent Mode.")
-        return independent_fallback()
+        # Show the ACTUAL error so users know what went wrong with their API key
+        error_msg = str(e)
+        print(f"External LLM Failed: {error_msg}. Falling back to Independent Mode.")
+        fallback = independent_fallback()
+        fallback.response = f"⚠️ **LLM Error ({provider_used})**: {error_msg}\n\n---\n\n{fallback.response}"
+        fallback.provider_used = f"{provider_used}_failed"
+        return fallback
 
     response_message = response.choices[0].message
     
