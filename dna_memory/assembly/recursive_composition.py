@@ -131,13 +131,39 @@ class AssemblyEngine:
             
             if component_id in self._component_to_assemblies:
                 self._component_to_assemblies[component_id].discard(assembly_id)
+                if not self._component_to_assemblies[component_id]:
+                    del self._component_to_assemblies[component_id]
 
         assembly.version += 1
         self.recompose(assembly_id)
         return assembly
 
-    def recompose(self, assembly_id: str) -> np.ndarray:
-        """Recalculates the cached composite vector for an assembly (and invalidates upwards)."""
+    def delete_assembly(self, assembly_id: str):
+        """Removes an assembly completely and cleans up all inverted index references."""
+        assembly = self._assemblies.pop(assembly_id, None)
+        if not assembly:
+            return
+
+        for cid in assembly.component_ids:
+            if cid in self._component_to_assemblies:
+                self._component_to_assemblies[cid].discard(assembly_id)
+                if not self._component_to_assemblies[cid]:
+                    del self._component_to_assemblies[cid]
+
+        # Also remove from any parent assemblies that contained this assembly
+        parent_ids = list(self.find_parent_assemblies(assembly_id))
+        for pid in parent_ids:
+            if pid in self._assemblies:
+                self.remove_component(pid, assembly_id)
+
+    def recompose(self, assembly_id: str, visited: Optional[Set[str]] = None) -> np.ndarray:
+        """Recalculates the cached composite vector for an assembly and invalidates upwards."""
+        if visited is None:
+            visited = set()
+        if assembly_id in visited:
+            return self._assemblies[assembly_id].vector if assembly_id in self._assemblies else np.zeros(self.dna_registry.encoder.dims)
+        visited.add(assembly_id)
+
         assembly = self._assemblies.get(assembly_id)
         if not assembly:
             raise KeyError(f"Assembly '{assembly_id}' not found.")
@@ -149,12 +175,20 @@ class AssemblyEngine:
         )
         assembly.vector = new_vec
 
-        # Propagate recomposition to parent assemblies recursively
+        # Propagate recomposition to all parent assemblies recursively
         for parent_id in self.find_parent_assemblies(assembly_id):
             if parent_id != assembly_id and parent_id in self._assemblies:
-                self.recompose(parent_id)
+                self.recompose(parent_id, visited=visited)
 
         return new_vec
+
+    def update_atomic_component(self, atom_id: str):
+        """Triggers recomposition across all assemblies that directly or indirectly contain atom_id."""
+        parents = self.find_parent_assemblies(atom_id)
+        visited = set()
+        for pid in parents:
+            if pid in self._assemblies:
+                self.recompose(pid, visited=visited)
 
     def decompose(self, assembly_id: str) -> Dict[str, Any]:
         """
@@ -185,14 +219,45 @@ class AssemblyEngine:
         }
 
     def find_parent_assemblies(self, component_id: str) -> List[str]:
-        """Discovers which higher-level concepts or assemblies utilize this component."""
+        """Discovers which higher-level concepts or assemblies utilize this component directly."""
         return list(self._component_to_assemblies.get(component_id, set()))
+
+    def find_ancestor_assemblies(self, component_id: str, visited: Optional[Set[str]] = None) -> List[str]:
+        """Discovers all transitive ancestors (parents, grandparents, etc.) that utilize this component."""
+        if visited is None:
+            visited = set()
+        ancestors = set()
+        direct_parents = self._component_to_assemblies.get(component_id, set())
+        for pid in direct_parents:
+            if pid not in visited:
+                visited.add(pid)
+                ancestors.add(pid)
+                ancestors.update(self.find_ancestor_assemblies(pid, visited=visited))
+        return list(ancestors)
 
     def get(self, assembly_id: str) -> Optional[DNAAssembly]:
         return self._assemblies.get(assembly_id)
 
     def count(self) -> int:
         return len(self._assemblies)
+
+    def serialize(self) -> dict:
+        """Serializes all assemblies and index mappings."""
+        return {
+            "next_asmb_seq": self._next_asmb_seq,
+            "assemblies": {aid: asmb.to_dict() for aid, asmb in self._assemblies.items()}
+        }
+
+    def restore(self, data: dict):
+        """Restores assemblies and reconstructs the inverted index."""
+        self._next_asmb_seq = data.get("next_asmb_seq", 1)
+        self._assemblies.clear()
+        self._component_to_assemblies.clear()
+        for aid, asmb_data in data.get("assemblies", {}).items():
+            asmb = DNAAssembly.from_dict(asmb_data)
+            self._assemblies[aid] = asmb
+            for cid in asmb.component_ids:
+                self._component_to_assemblies.setdefault(cid, set()).add(aid)
 
     def _compute_assembly_vector(
         self,

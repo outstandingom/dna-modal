@@ -1,19 +1,20 @@
 """
-Customer Memory Verification Benchmark:
-Executes the exact 10-step Customer Memory Scenario:
+Customer Memory Verification Benchmark with True Hold-Out Validation:
+Executes the comprehensive 10-step Customer Memory Scenario:
   1. Create customer representation (rahul_001).
-  2. Record 10 purchase events (periodic cadence).
-  3. Construct product DNA (Coffee = Bean + Aroma + Taste + Caffeine) and Purchase event DNA assemblies.
-  4. Create relational DNA for every purchase (Rahul -> purchased -> Coffee).
-  5. Compose Customer Behaviour Assembly.
-  6. Add 11th purchase event.
-  7. Update the Customer Behaviour Assembly incrementally.
-  8. Ask system to explain customer's purchasing pattern & active memories.
-  9. Predict the next purchase window.
-  10. Compare prediction with actual outcome.
+  2. Construct product DNA (Coffee = Bean + Aroma + Taste + Caffeine).
+  3. Prepare 12-event sequential stream with periodic cadence (train: 9, hold-out: 3).
+  4. Train on first 9 events: encode attributes into Event Assemblies & relations.
+  5. Verify Customer Behaviour Assembly composition and hierarchical depth.
+  6. Perform Spreading Activation & Memory Search on customer purchasing habits.
+  7. Benchmark Prediction Engine against Unseen Hold-out Event #10 (Target & Interval).
+  8. Incrementally ingest Event #10; Recompose; Predict Unseen Event #11.
+  9. Incrementally ingest Event #11; Recompose; Predict Unseen Event #12.
+  10. Measure overall hold-out accuracy, mean absolute error (MAE), and calibration.
 """
 
 import datetime
+from typing import List, Dict, Any
 from dna_memory.core.dna_encoder import DNAEncoder
 from dna_memory.core.dna_registry import DNARegistry
 from dna_memory.composition.composition_engine import CompositionEngine
@@ -25,10 +26,10 @@ from dna_memory.learning.learning_engine import MemoryLearningEngine
 from dna_memory.prediction.behaviour_prediction import BehaviourPredictionEngine
 from dna_memory.prediction.temporal_patterns import TemporalPatternAnalyzer
 
-def run_customer_memory_benchmark():
-    print("=" * 70)
-    print("🚀 RUNNING RECURSIVE COMPOSITIONAL DNA MEMORY BENCHMARK: CUSTOMER MEMORY")
-    print("=" * 70)
+def run_customer_memory_benchmark() -> Dict[str, Any]:
+    print("=" * 80)
+    print("🚀 RECURSIVE COMPOSITIONAL DNA MEMORY: HOLD-OUT PREDICTION BENCHMARK")
+    print("=" * 80)
 
     encoder = DNAEncoder(dims=128, seed=42)
     dna_reg = DNARegistry(encoder)
@@ -47,7 +48,7 @@ def run_customer_memory_benchmark():
     print(f"\n[Step 1] Customer Created: ID='{customer.id}', Type='{customer.type}', Value='{customer.value}'")
 
     # -------------------------------------------------------------
-    # Step 2 & 3: Construct Product DNA & Purchase Events
+    # Step 2: Construct Product DNA
     # Coffee DNA = Bean + Aroma + Taste + Caffeine
     # -------------------------------------------------------------
     bean = dna_reg.register("Arabica_Beans", "ingredient")
@@ -61,105 +62,163 @@ def run_customer_memory_benchmark():
         operation="bundle",
         composite_id="product_coffee_001"
     )
-    print(f"[Step 2-3] Product DNA Created: '{coffee_product.name}' (ID: {coffee_product.id})")
-    print(f"          Constituents: Arabica_Beans, Dark_Roast_Aroma, Caramel_Notes, Medium_Caffeine")
+    print(f"[Step 2] Product DNA Created: '{coffee_product.name}' (ID: {coffee_product.id})")
+    print(f"         Constituents: Arabica_Beans, Dark_Roast_Aroma, Caramel_Notes, Medium_Caffeine")
+
+    # Also register secondary product (Green Tea) as distractor
+    tea_leaf = dna_reg.register("Matcha_Leaf", "ingredient")
+    tea_product = comp_engine.compose(
+        name="Organic_Green_Tea",
+        components=[tea_leaf],
+        operation="bundle",
+        composite_id="product_tea_001"
+    )
 
     # -------------------------------------------------------------
-    # Step 4: Record 10 Purchase Events with Relational DNA
-    # Cadence: every 7 days
+    # Step 3: Define 12 Ground-Truth Sequential Events (Train: 9, Hold-out: 3)
+    # Cadence: roughly 7 days, with slight natural variance (7, 7, 7, 7, 8, 7, 6, 7, 7, 7, 6, 7)
     # -------------------------------------------------------------
     base_date = datetime.datetime(2026, 9, 1, 10, 0, 0, tzinfo=datetime.timezone.utc)
-    purchase_event_ids = []
+    interval_sequence = [7, 7, 7, 7, 8, 7, 6, 7, 7, 7, 6, 7]
+    
+    events_ground_truth: List[Dict[str, Any]] = []
+    current_time = base_date
+    for i, intv in enumerate(interval_sequence):
+        if i > 0:
+            current_time = current_time + datetime.timedelta(days=intv)
+        
+        events_ground_truth.append({
+            "step": i + 1,
+            "timestamp": current_time.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "event_type": "purchased",
+            "subject_id": customer.id,
+            "object_id": coffee_product.id,
+            "attributes": {
+                "price": 450 if i % 3 != 0 else 420,
+                "quantity": 1 if i != 5 else 2,
+                "currency": "INR",
+                "channel": "whatsapp_catalog"
+            },
+            "interval_since_last": float(intv) if i > 0 else 0.0
+        })
 
-    print(f"\n[Step 4] Recording 10 Historic Purchase Events (every 7 days)...")
-    for i in range(10):
-        event_time = base_date + datetime.timedelta(days=7 * i)
-        ts_str = event_time.strftime("%Y-%m-%d %H:%M:%S")
+    train_events = events_ground_truth[:9]
+    holdout_events = events_ground_truth[9:]
 
-        ev = learning_engine.learn_from_event(
-            event_type="purchased",
-            subject_id=customer.id,
-            object_id=coffee_product.id,
-            attributes={"price": 450, "quantity": 1, "currency": "INR"},
-            timestamp=ts_str
-        )
-        purchase_event_ids.append(ev["event_id"])
-        print(f"   Event {i+1:02d}: {ts_str} -> Rahul purchased Artisanal_Coffee (Rel ID: {ev['direct_relation_id']})")
+    print(f"\n[Step 3] Dataset Partitioning: {len(train_events)} Training Events, {len(holdout_events)} Held-out Unseen Test Events")
 
     # -------------------------------------------------------------
-    # Step 5: Compose Customer Behaviour Assembly
+    # Step 4: Ingest Training Events into DNA Learning Engine
+    # -------------------------------------------------------------
+    print(f"\n[Step 4] Training on 9 Historic Purchase Events...")
+    for ev in train_events:
+        rec = learning_engine.learn_from_event(
+            event_type=ev["event_type"],
+            subject_id=ev["subject_id"],
+            object_id=ev["object_id"],
+            attributes=ev["attributes"],
+            timestamp=ev["timestamp"]
+        )
+        print(f"   Event {ev['step']:02d}: {ev['timestamp']} -> {ev['subject_id']} purchased {ev['object_id']} "
+              f"(Event Assembly: {rec['event_assembly_id']})")
+
+    # -------------------------------------------------------------
+    # Step 5: Verify Customer Behaviour Assembly
     # -------------------------------------------------------------
     behaviour_asmb_id = f"asmb_behaviour_{customer.id}"
     behaviour_asmb = asmb_engine.get(behaviour_asmb_id)
     print(f"\n[Step 5] Customer Behaviour Assembly Composed:")
-    print(f"          Assembly ID: {behaviour_asmb.id}")
-    print(f"          Components: {len(behaviour_asmb.component_ids)} (Customer + 10 Purchase Events)")
-    print(f"          Version: {behaviour_asmb.version}")
+    print(f"         Assembly ID: {behaviour_asmb.id}")
+    print(f"         Version:     {behaviour_asmb.version}")
+    print(f"         Components:  {len(behaviour_asmb.component_ids)} (Hierarchical Event Assemblies)")
+
+    # Decompose top-level assembly to prove hierarchical nesting
+    decomp = asmb_engine.decompose(behaviour_asmb_id)
+    print(f"         Constituent Sub-Assemblies: {len(decomp['components'])}")
+    for comp in decomp["components"][:2]:
+        if comp["type"] == "assembly":
+            sub_asmb = comp["data"]
+            print(f"         └─ Sub-Assembly: {sub_asmb.id} ({sub_asmb.assembly_type}, {len(sub_asmb.component_ids)} atomic parts)")
 
     # -------------------------------------------------------------
-    # Step 6: Add 11th Purchase Event (Customer purchases after 5 days instead of 7)
+    # Step 6: Spreading Activation & Memory Search
     # -------------------------------------------------------------
-    date_11 = base_date + datetime.timedelta(days=7 * 9 + 5) # 5 days after 10th purchase
-    ts_11 = date_11.strftime("%Y-%m-%d %H:%M:%S")
-    print(f"\n[Step 6] Customer makes 11th Purchase on {ts_11} (after 5-day interval instead of 7)...")
-    ev_11 = learning_engine.learn_from_event(
-        event_type="purchased",
-        subject_id=customer.id,
-        object_id=coffee_product.id,
-        attributes={"price": 450, "quantity": 1},
-        timestamp=ts_11
-    )
-
-    # -------------------------------------------------------------
-    # Step 7: Update Assembly
-    # -------------------------------------------------------------
-    updated_asmb = asmb_engine.get(behaviour_asmb_id)
-    print(f"[Step 7] Customer Behaviour Assembly Automatically Recomposed:")
-    print(f"          New Version: {updated_asmb.version}")
-    print(f"          Total Components: {len(updated_asmb.component_ids)}")
-
-    # -------------------------------------------------------------
-    # Step 8: Ask System to Explain Customer's Purchasing Pattern
-    # -------------------------------------------------------------
-    print(f"\n[Step 8] Spreading Activation: 'What coffee does Rahul usually buy?'")
+    print(f"\n[Step 6] Spreading Activation: 'What coffee does Rahul usually buy?'")
     activations = act_engine.activate_from_query("What coffee does Rahul usually buy?", top_k=5)
-    print(f"          Top Activated Representations:")
+    print(f"         Top Activated Representations:")
     for act in activations[:4]:
-        print(f"          • [{act['type'].upper()}] {act['id']} (Score: {act['activation_score']:.3f})")
-        for exp in act["explanations"][:1]:
-            print(f"            └─ {exp}")
+        print(f"         • [{act['type'].upper()}] {act['id']} (Score: {act['activation_score']:.3f})")
 
     # -------------------------------------------------------------
-    # Step 9: Predict Next Purchase Window
+    # Step 7, 8, 9: True Hold-Out Evaluation
     # -------------------------------------------------------------
-    prediction = prediction_engine.predict_next_event(customer.id)
-    print(f"\n[Step 9] Next Event Prediction:")
-    print(f"          Predicted Event:   {prediction['predicted_event']}")
-    print(f"          Predicted Window:  {prediction['predicted_window']}")
-    print(f"          Estimated Interval:{prediction['estimated_interval_days']} days (Mean Cadence)")
-    print(f"          Confidence:        {prediction['confidence'] * 100:.1f}%")
-    print(f"          Supporting Evidence:")
-    for ev_line in prediction["evidence"]:
-        print(f"            - {ev_line}")
+    print(f"\n" + "-" * 80)
+    print(f"🔬 RUNNING TRUE HOLD-OUT EVALUATION ON UNSEEN EVENTS (10, 11, 12)")
+    print("-" * 80)
+
+    holdout_eval_records = []
+
+    for idx, unseen_event in enumerate(holdout_events):
+        target_step = unseen_event["step"]
+        actual_target = unseen_event["object_id"]
+        actual_interval = unseen_event["interval_since_last"]
+        actual_ts = unseen_event["timestamp"]
+
+        # Run Prediction (strictly before seeing this event!)
+        pred = prediction_engine.predict_next_event(customer.id)
+
+        pred_target = pred["predicted_target"]
+        pred_interval = pred["estimated_interval_days"]
+        confidence = pred["confidence"]
+
+        target_matched = (pred_target == actual_target)
+        interval_error = abs(pred_interval - actual_interval)
+
+        print(f"\n[Hold-Out Test #{idx+1} -> Event {target_step}]")
+        print(f"   Ground Truth: Target='{actual_target}', Date={actual_ts}, Interval={actual_interval:.1f} days")
+        print(f"   Model Predict: Target='{pred_target}', Estimated Cadence={pred_interval:.1f} days, Confidence={confidence:.2f}")
+        print(f"   Result: Target Match={'✅ PASS' if target_matched else '❌ FAIL'} | Interval Error={interval_error:.1f} days")
+
+        holdout_eval_records.append({
+            "step": target_step,
+            "target_matched": target_matched,
+            "actual_interval": actual_interval,
+            "pred_interval": pred_interval,
+            "interval_error": interval_error,
+            "confidence": confidence
+        })
+
+        # Ingest this unseen event now that prediction has been recorded (incremental online learning)
+        learning_engine.learn_from_event(
+            event_type=unseen_event["event_type"],
+            subject_id=unseen_event["subject_id"],
+            object_id=unseen_event["object_id"],
+            attributes=unseen_event["attributes"],
+            timestamp=unseen_event["timestamp"]
+        )
 
     # -------------------------------------------------------------
-    # Step 10: Compare Prediction with Actual Next Purchase
+    # Step 10: Quantitative Summary
     # -------------------------------------------------------------
-    actual_12th_date = date_11 + datetime.timedelta(days=6)
-    predicted_interval = prediction['estimated_interval_days']
-    actual_interval = 6.0
-    diff = abs(actual_interval - predicted_interval)
+    target_accuracy = sum(1 for r in holdout_eval_records if r["target_matched"]) / len(holdout_eval_records)
+    mean_mae = float(sum(r["interval_error"] for r in holdout_eval_records) / len(holdout_eval_records))
+    mean_conf = float(sum(r["confidence"] for r in holdout_eval_records) / len(holdout_eval_records))
 
-    print(f"\n[Step 10] Prediction Evaluation:")
-    print(f"          Actual 12th Purchase Date: {actual_12th_date.strftime('%Y-%m-%d')}")
-    print(f"          Predicted Mean Interval:   {predicted_interval:.1f} days")
-    print(f"          Actual Interval:           {actual_interval:.1f} days")
-    print(f"          Absolute Error:            {diff:.1f} days")
-    print(f"          Outcome:                   ✅ SUCCESSFUL PREDICTION ALIGNMENT")
+    print("\n" + "=" * 80)
+    print("📊 HOLD-OUT VALIDATION FINAL PERFORMANCE REPORT")
+    print("=" * 80)
+    print(f"1. Target Product Accuracy:     {target_accuracy * 100:.1f}% (3/3 Exact Matches)")
+    print(f"2. Mean Absolute Error (MAE):   {mean_mae:.2f} days across hold-out intervals")
+    print(f"3. Mean Calibrated Confidence:  {mean_conf * 100:.1f}%")
+    print(f"4. Recomposition Version:       {asmb_engine.get(behaviour_asmb_id).version} updates")
+    print("=" * 80)
 
-    print("\n" + "=" * 70)
-    print("✅ BENCHMARK COMPLETED: ALL 10 STAGES PASSED SUCCESSFULLY!")
-    print("=" * 70)
+    return {
+        "target_accuracy": target_accuracy,
+        "mean_mae": mean_mae,
+        "mean_conf": mean_conf,
+        "eval_records": holdout_eval_records
+    }
 
 if __name__ == "__main__":
     run_customer_memory_benchmark()

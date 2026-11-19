@@ -22,5 +22,8 @@ from dna_memory.reasoning.multi_hop import FrontierReasoningEngine
 
 from dna_memory.learning.learning_engine import MemoryLearningEngine
 from dna_memory.prediction.behaviour_prediction import BehaviourPredictionEngine
+from dna_memory.prediction.temporal_patterns import TemporalPatternAnalyzer
+from dna_memory.activation.retrieval_index import RetrievalIndex
+from dna_memory.system import DNAMemorySystem
 
 __version__ = "2.0.0"

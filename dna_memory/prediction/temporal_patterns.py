@@ -12,13 +12,42 @@ class TemporalPatternAnalyzer:
     """
     @staticmethod
     def parse_timestamp(ts_str: str) -> datetime.datetime:
-        for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%dT%H:%M:%S.%f%z", "%Y-%m-%dT%H:%M:%S%z"):
+        """
+        Strictly parses ISO-8601 timestamps and standard datetime strings.
+        Raises ValueError on malformed or invalid timestamps without silent fallback.
+        Preserves timezone offset and normalizes to UTC.
+        """
+        if not ts_str or not isinstance(ts_str, str):
+            raise ValueError(f"Invalid timestamp value: {ts_str!r}. Expected non-empty string.")
+
+        s = ts_str.strip()
+        try:
+            clean_s = s.replace("Z", "+00:00") if s.endswith("Z") else s
+            dt = datetime.datetime.fromisoformat(clean_s)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=datetime.timezone.utc)
+            else:
+                dt = dt.astimezone(datetime.timezone.utc)
+            return dt
+        except Exception:
+            pass
+
+        for fmt in (
+            "%Y-%m-%d %H:%M:%S",
+            "%Y-%m-%d",
+            "%Y-%m-%d %H:%M:%S.%f",
+            "%d-%m-%Y %H:%M:%S",
+            "%d/%m/%Y %H:%M:%S"
+        ):
             try:
-                dt = datetime.datetime.strptime(ts_str.split("+")[0].strip(), fmt)
+                dt = datetime.datetime.strptime(s, fmt)
                 return dt.replace(tzinfo=datetime.timezone.utc)
             except Exception:
                 continue
-        return datetime.datetime.now(datetime.timezone.utc)
+
+        raise ValueError(
+            f"Invalid timestamp format: '{ts_str}'. Expected valid ISO-8601 (e.g. '2026-09-01T10:00:00Z' or 'YYYY-MM-DD HH:MM:SS')."
+        )
 
     @classmethod
     def calculate_intervals_days(cls, timestamps: List[str]) -> List[float]:

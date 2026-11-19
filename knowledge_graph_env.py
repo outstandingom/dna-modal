@@ -23,6 +23,7 @@ from graders import task_easy, task_medium, task_hard, TASKS, GRADERS
 from skill_adapter import get_adapter
 from projection import DimensionProjector, ProjectionCache
 from dynamic_knowledge_loader import DynamicKnowledgeLoader, ConceptData
+from dna_memory import DNAMemorySystem
 
 # ============================================================
 # Configuration
@@ -68,6 +69,21 @@ LOW_CONFIDENCE_THRESHOLD = 0.4
 
 os.makedirs(PERSIST_DIR, exist_ok=True)
 load_dotenv()
+
+# Initialize Recursive Compositional DNA Memory Architecture
+_dna_memory_system = DNAMemorySystem(dims=DIMS)
+DNA_STATE_FILE = os.path.join(PERSIST_DIR, "dna_memory_state.json")
+if os.path.exists(DNA_STATE_FILE):
+    try:
+        _dna_memory_system.load_from_disk(DNA_STATE_FILE)
+    except Exception as e:
+        print(f"[WARN] Failed to load DNA memory state: {e}")
+
+def save_dna_memory():
+    try:
+        _dna_memory_system.save_to_disk(DNA_STATE_FILE)
+    except Exception as e:
+        print(f"[WARN] Failed to save DNA memory state: {e}")
 
 # ============================================================
 # BYOK: Multi-Provider Registry
@@ -1741,6 +1757,7 @@ def _boot_env():
 async def lifespan(app: FastAPI):
     threading.Thread(target=_boot_env, daemon=True).start()
     yield
+    save_dna_memory()
     if _api_env is not None:
         _api_env.close()
 
@@ -1834,6 +1851,14 @@ class ReinforceRequest(BaseModel):
     concepts: List[str]
     reward: float
     query: Optional[str] = ""
+
+# ── Recursive DNA Memory Models ──────────────────────────────────
+class DNALearnRequest(BaseModel):
+    subject_id: str
+    event_type: str
+    object_id: str
+    attributes: Optional[Dict[str, Any]] = None
+    timestamp: Optional[str] = None
 
 # ── Agent models ─────────────────────────────────────────────────
 class AgentRequest(BaseModel):
@@ -2148,6 +2173,48 @@ async def attention_endpoint(query: str, top_k: int = 20):
             "threshold": ATTENTION_THRESHOLD}
 
 
+# ── Recursive Compositional DNA Memory Endpoints ─────────────────
+@app.post("/dna-memory/learn")
+async def dna_learn_endpoint(req: DNALearnRequest):
+    try:
+        rec = _dna_memory_system.record_interaction(
+            customer_id=req.subject_id,
+            event_type=req.event_type,
+            target_id=req.object_id,
+            attributes=req.attributes,
+            timestamp=req.timestamp
+        )
+        save_dna_memory()
+        return {"status": "success", "event_record": rec}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.get("/dna-memory/predict/{customer_id}")
+async def dna_predict_endpoint(customer_id: str):
+    try:
+        pred = _dna_memory_system.predict_next_action(customer_id)
+        return {"status": "success", "prediction": pred}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.get("/dna-memory/stats")
+async def dna_stats_endpoint():
+    return {
+        "status": "online",
+        "atomic_count": _dna_memory_system.dna_registry.count(),
+        "relation_count": _dna_memory_system.relation_registry.count(),
+        "assembly_count": _dna_memory_system.assembly_engine.count(),
+        "event_history_count": len(_dna_memory_system.learning_engine.get_event_history()),
+        "index_count": _dna_memory_system.retrieval_index.count()
+    }
+
+@app.get("/dna-memory/benchmark")
+async def dna_benchmark_endpoint():
+    from dna_memory.benchmarks.customer_memory_scenario import run_customer_memory_benchmark
+    res = run_customer_memory_benchmark()
+    return {"status": "success", "results": res}
+
+
 # ── /agent endpoint (enhanced with DNA pipeline results) ─────────
 @app.post("/agent", response_model=AgentResponse)
 async def agent_endpoint(req: AgentRequest):
@@ -2167,7 +2234,13 @@ async def agent_endpoint(req: AgentRequest):
             "description":"Parses text, extracts concepts, saves them to graph memory.",
             "parameters":{"type":"object","properties":{
                 "text":{"type":"string","description":"Raw text to learn from"}},
-                "required":["text"]}}}
+                "required":["text"]}}},
+        {"type":"function","function":{
+            "name":"predict_customer_dna",
+            "description":"Predicts customer next purchase, preferences, and optimal reorder timing using Recursive DNA Memory.",
+            "parameters":{"type":"object","properties":{
+                "customer_id":{"type":"string","description":"Customer ID to predict behavior for"}},
+                "required":["customer_id"]}}}
     ]
     skill_vector     = _api_env.get_skill_vector_from_text(req.message)
     skill_vector_str = "[" + ", ".join(f"{x:.2f}" for x in skill_vector) + "]"

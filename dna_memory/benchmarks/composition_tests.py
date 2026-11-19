@@ -158,5 +158,147 @@ class TestCompositionalDNAMemory(unittest.TestCase):
         parents = self.asmb_engine.find_parent_assemblies(c1.id)
         self.assertIn(asmb.id, parents)
 
+    def test_07_nested_multilevel_assembly_and_ancestor_invalidation(self):
+        """Verify multi-level nested assemblies: modifying leaf triggers upward ancestor recomposition."""
+        leaf1 = self.dna_reg.register("LeafNode1", "property")
+        leaf2 = self.dna_reg.register("LeafNode2", "property")
+
+        # Child assembly (Level 1)
+        child_asmb = self.asmb_engine.create_assembly("ChildAssembly", [leaf1.id, leaf2.id])
+        
+        # Parent assembly (Level 2)
+        other_node = self.dna_reg.register("OtherNode", "property")
+        parent_asmb = self.asmb_engine.create_assembly("ParentAssembly", [child_asmb.id, other_node.id])
+
+        # Grandparent assembly (Level 3)
+        top_node = self.dna_reg.register("TopNode", "property")
+        grandparent_asmb = self.asmb_engine.create_assembly("GrandparentAssembly", [parent_asmb.id, top_node.id])
+
+        # Check ancestor discovery
+        ancestors = self.asmb_engine.find_ancestor_assemblies(leaf1.id)
+        self.assertIn(child_asmb.id, ancestors)
+        self.assertIn(parent_asmb.id, ancestors)
+        self.assertIn(grandparent_asmb.id, ancestors)
+
+        # Modifying leaf1 via remove or child recomposition
+        parent_initial_v = parent_asmb.vector.copy()
+        grandparent_initial_v = grandparent_asmb.vector.copy()
+
+        leaf3 = self.dna_reg.register("LeafNode3", "property")
+        self.asmb_engine.add_component(child_asmb.id, leaf3.id)
+
+        # Child recomposition must have cascaded to parent and grandparent
+        self.assertFalse(np.allclose(parent_asmb.vector, parent_initial_v))
+        self.assertFalse(np.allclose(grandparent_asmb.vector, grandparent_initial_v))
+
+        # Test clean component removal
+        self.asmb_engine.remove_component(child_asmb.id, leaf1.id)
+        self.assertNotIn(child_asmb.id, self.asmb_engine.find_parent_assemblies(leaf1.id))
+
+    def test_08_event_attribute_composition_in_learning(self):
+        """Verify price, quantity, and currency attributes are encoded as AtomicDNA and composed into EventAssembly."""
+        from dna_memory.learning.learning_engine import MemoryLearningEngine
+        learner = MemoryLearningEngine(self.dna_reg, self.rel_reg, self.asmb_engine)
+
+        cust = self.dna_reg.register("Customer_A", "customer")
+        prod = self.dna_reg.register("Product_X", "product")
+
+        rec = learner.learn_from_event(
+            event_type="purchased",
+            subject_id=cust.id,
+            object_id=prod.id,
+            attributes={"price": 999, "currency": "INR", "quantity": 3},
+            timestamp="2026-11-19T10:00:00Z"
+        )
+
+        event_asmb = self.asmb_engine.get(rec["event_assembly_id"])
+        self.assertIsNotNone(event_asmb)
+        self.assertEqual(event_asmb.assembly_type, "EventAssembly")
+
+        # Decompose event assembly to verify presence of attribute atoms
+        decomp = self.asmb_engine.decompose(event_asmb.id)
+        atom_values = [c["data"].value for c in decomp["components"] if c["type"] == "atomic"]
+        self.assertIn("price:999", atom_values)
+        self.assertIn("currency:INR", atom_values)
+        self.assertIn("quantity:3", atom_values)
+
+    def test_09_strict_iso_timestamp_validation(self):
+        """Verify TemporalPatternAnalyzer strictly rejects malformed timestamps with ValueError."""
+        from dna_memory.prediction.temporal_patterns import TemporalPatternAnalyzer
+        
+        # Valid ISO formats
+        dt1 = TemporalPatternAnalyzer.parse_timestamp("2026-11-19T12:00:00Z")
+        self.assertEqual(dt1.year, 2026)
+        dt2 = TemporalPatternAnalyzer.parse_timestamp("2026-11-19 12:00:00")
+        self.assertEqual(dt2.month, 11)
+
+        # Invalid formats must raise ValueError, not silently return datetime.now()
+        with self.assertRaises(ValueError):
+            TemporalPatternAnalyzer.parse_timestamp("not-a-timestamp")
+
+        with self.assertRaises(ValueError):
+            TemporalPatternAnalyzer.parse_timestamp("invalid-date-32-13-2026")
+
+        with self.assertRaises(ValueError):
+            TemporalPatternAnalyzer.parse_timestamp("")
+
+    def test_10_clustered_ann_retrieval_index(self):
+        """Verify pure-NumPy IVF clustered ANN index partitions vector space and recovers top-k matches."""
+        from dna_memory.activation.retrieval_index import RetrievalIndex
+        idx = RetrievalIndex(dims=128, cluster_threshold=16)
+
+        # Insert 40 random vectors
+        np.random.seed(42)
+        test_ids = []
+        for i in range(40):
+            item_id = f"item_{i:03d}"
+            vec = np.random.randn(128)
+            idx.add(item_id, vec, {"index": i})
+            test_ids.append((item_id, vec))
+
+        self.assertTrue(idx.is_clustered(), "Index should have built clusters after exceeding threshold")
+        
+        # Query target vector
+        target_id, target_vec = test_ids[10]
+        results = idx.query(target_vec, top_k=3, nprobe=3)
+        self.assertGreater(len(results), 0)
+        top_match_id = results[0][0]
+        self.assertEqual(top_match_id, target_id, "Clustered ANN index must recover exact target as top-1")
+
+    def test_11_full_system_unified_persistence(self):
+        """Verify DNAMemorySystem save_to_disk and load_from_disk restore exact state."""
+        import tempfile, os
+        from dna_memory.system import DNAMemorySystem
+
+        sys1 = DNAMemorySystem(dims=128, seed=42)
+        c1 = sys1.register_concept("Espresso", "product")
+        c2 = sys1.register_concept("Steamed_Milk", "ingredient")
+        cust = sys1.register_concept("Vikram", "customer")
+
+        sys1.record_interaction(
+            customer_id=cust.id,
+            event_type="purchased",
+            target_id=c1.id,
+            attributes={"price": 220, "currency": "INR"}
+        )
+
+        tmp_file = tempfile.mktemp(suffix=".json")
+        try:
+            sys1.save_to_disk(tmp_file)
+
+            sys2 = DNAMemorySystem(dims=128, seed=42)
+            sys2.load_from_disk(tmp_file)
+
+            self.assertEqual(sys2.dna_registry.count(), sys1.dna_registry.count())
+            self.assertEqual(sys2.relation_registry.count(), sys1.relation_registry.count())
+            self.assertEqual(sys2.assembly_engine.count(), sys1.assembly_engine.count())
+            self.assertEqual(len(sys2.learning_engine.get_event_history()), 1)
+
+            pred = sys2.predict_next_action(cust.id)
+            self.assertEqual(pred["predicted_target"], c1.id)
+        finally:
+            if os.path.exists(tmp_file):
+                os.remove(tmp_file)
+
 if __name__ == "__main__":
     unittest.main()

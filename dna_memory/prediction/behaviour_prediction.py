@@ -4,12 +4,14 @@ Combines temporal pattern analysis, relational preference strengths, and recursi
 to estimate the next event window, likely product/service, confidence, and supporting evidence.
 """
 
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, TYPE_CHECKING
 import datetime
 from dna_memory.relations.relation_registry import RelationRegistry
 from dna_memory.assembly.recursive_composition import AssemblyEngine
-from dna_memory.learning.learning_engine import MemoryLearningEngine
 from dna_memory.prediction.temporal_patterns import TemporalPatternAnalyzer
+
+if TYPE_CHECKING:
+    from dna_memory.learning.learning_engine import MemoryLearningEngine
 
 class BehaviourPredictionEngine:
     """

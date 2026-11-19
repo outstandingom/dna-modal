@@ -125,3 +125,24 @@ class RelationRegistry:
 
     def count(self) -> int:
         return len(self._relations)
+
+    def serialize(self) -> dict:
+        """Serializes all relations and indices."""
+        return {
+            "next_rel_seq": self._next_rel_seq,
+            "relations": {rid: rel.to_dict() for rid, rel in self._relations.items()}
+        }
+
+    def restore(self, data: dict):
+        """Restores relations and rebuilds subject/object/type inverted indices."""
+        self._next_rel_seq = data.get("next_rel_seq", 1)
+        self._relations.clear()
+        self._by_subject.clear()
+        self._by_object.clear()
+        self._by_type.clear()
+        for rid, rdata in data.get("relations", {}).items():
+            rel = RelationDNA.from_dict(rdata)
+            self._relations[rid] = rel
+            self._by_subject.setdefault(rel.subject_id, []).append(rid)
+            self._by_object.setdefault(rel.object_id, []).append(rid)
+            self._by_type.setdefault(rel.relation_type, []).append(rid)
