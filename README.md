@@ -86,3 +86,12 @@ If you want to test it completely for free:
 1. Create a new "Docker Space".
 2. Upload this code.
 3. Hugging Face handles the rest. (Requires setting up persistent storage in their settings to keep `.pkl` files).
+
+---
+
+## 🔬 Research & Benchmarks
+
+For in-depth mathematical proofs, empirical capacity experiments, and hold-out customer memory validation:
+- 📊 **[Full Benchmark & Validation Report](./RECURSIVE_COMPOSITIONAL_DNA_BENCHMARK.md)**: Multi-dimensional capacity benchmarks (128D, 512D, 1024D) & 100% hold-out predictive accuracy.
+- 📄 **[Research Paper: DNA Knowledge Graph](./RESEARCH_PAPER_DNA_KNOWLEDGE_GRAPH.md)**: Comprehensive architectural specification and mathematical foundations.
+- 💡 **[Why DNA Knowledge Graph Beats Vector RAG](./WHY_DNA_KNOWLEDGE_GRAPH_BEATS_VECTOR_RAG.md)**: Cost, token reduction, and reasoning analysis.
