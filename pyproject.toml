@@ -3,21 +3,21 @@ requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "knowledge_graph_env"
-version = "1.0.0"
-description = "OpenEnv environment for customer support reasoning"
+name = "dna-knowledge-graph"
+version = "2.0.0"
+description = "Recursive Compositional DNA Memory Architecture for Autonomous AI Agents"
 authors = [{name = "OutstandingOm"}]
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
     "numpy",
-    "faiss-cpu",
     "fastapi",
     "uvicorn",
     "httpx",
     "pydantic",
     "openai",
-    "openenv-core>=0.2.0",
+    "python-dotenv",
+    "scikit-learn",
 ]
 
 [project.scripts]
@@ -25,5 +25,5 @@ server = "server.app:main"
 inference = "inference:main"
 
 [tool.setuptools]
-packages = ["server"]
+packages = ["server", "dna_memory"]
 py-modules = ["knowledge_graph_env", "inference"]
