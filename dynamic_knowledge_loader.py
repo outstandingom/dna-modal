@@ -6,7 +6,10 @@ Loads knowledge from multiple sources dynamically into the DNA Memory System.
 import os
 import json
 import csv
-import yaml
+try:
+    import yaml
+except ImportError:
+    yaml = None
 import time
 import logging
 import requests

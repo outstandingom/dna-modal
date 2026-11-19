@@ -2282,6 +2282,17 @@ async def agent_endpoint(req: AgentRequest):
         parts.append(f"📊 **Confidence**: {conf['confidence']:.0%} | "
                      f"Depth: {conf['reasoning_depth']} | "
                      f"Evidence: {conf['evidence_count']}")
+
+        # DNA Memory Customer Prediction check
+        target_cust = req.session_id or "rahul_001"
+        try:
+            dna_pred = _dna_memory_system.predict_next_action(target_cust)
+            if dna_pred and dna_pred.get("predicted_event") != "unknown":
+                parts.append(f"🧬 **DNA Memory Prediction**: Next likely event '{dna_pred['predicted_event']}' "
+                             f"({dna_pred.get('predicted_window')}, confidence {dna_pred.get('confidence', 0.0):.0%})")
+        except Exception:
+            pass
+
         parts.append(f"\n💡 {pipeline_result['explanation']}")
         return AgentResponse(response="\n".join(parts).strip(),
                              tool_calls=[], provider_used="local_graph")
@@ -2334,6 +2345,10 @@ async def agent_endpoint(req: AgentRequest):
         elif function_name == "extract_and_learn":
             return json.dumps(_api_env.extract_and_learn(
                 function_args.get("text",""), namespace=ns))
+        elif function_name == "predict_customer_dna":
+            cust_id = function_args.get("customer_id") or req.session_id or "rahul_001"
+            pred = _dna_memory_system.predict_next_action(cust_id)
+            return json.dumps(pred)
         return "Tool not found"
 
     # Handle text-embedded tool calls (some LLMs)
@@ -2348,7 +2363,7 @@ async def agent_endpoint(req: AgentRequest):
             pass
         if not parsed:
             import re
-            m = re.search(r'\{[^{}]*"name"\s*:\s*"(?:search_graph|extract_and_learn)"[^{}]*\}',
+            m = re.search(r'\{[^{}]*"name"\s*:\s*"(?:search_graph|extract_and_learn|predict_customer_dna)"[^{}]*\}',
                           content)
             if m:
                 try: parsed = json.loads(m.group())
