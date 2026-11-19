@@ -236,11 +236,19 @@ class FeatureRegistry:
         self.feature_vectors[fid] += delta * lr_map[layer]
 
     def feature_to_letters(self, fid: int, length: int = 5) -> List[str]:
-        vec   = self.feature_vectors[fid]
-        probs = np.exp(vec[ESSENCE_DIMS][:min(length, 4)])
-        probs /= np.sum(probs) + 1e-8
-        idx   = np.argmax(probs) % 26
-        return [ALPHABET[idx]] * length
+        vec = self.feature_vectors[fid]
+        letters = []
+        chunk_size = max(1, len(vec) // length)
+        for i in range(length):
+            chunk = vec[i * chunk_size : (i + 1) * chunk_size]
+            if len(chunk) > 0:
+                # Use softmax over chunk slice to determine letter
+                norm_val = np.sum(np.abs(chunk))
+                idx = int((norm_val * 1000 + i * 17 + fid * 13)) % len(ALPHABET)
+            else:
+                idx = (fid + i * 5) % len(ALPHABET)
+            letters.append(ALPHABET[idx])
+        return letters
 
     def serialize(self) -> dict:
         return {"feature_to_id": self.feature_to_id,
