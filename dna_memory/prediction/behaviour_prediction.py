@@ -4,6 +4,7 @@ Combines temporal pattern analysis, relational preference strengths, and recursi
 to estimate the next event window, likely product/service, confidence, and supporting evidence.
 """
 
+from __future__ import annotations
 from typing import Dict, Any, List, Optional, TYPE_CHECKING
 import datetime
 from dna_memory.relations.relation_registry import RelationRegistry
@@ -19,7 +20,7 @@ class BehaviourPredictionEngine:
     """
     def __init__(
         self,
-        learning_engine: MemoryLearningEngine,
+        learning_engine: Any,
         relation_registry: RelationRegistry,
         assembly_engine: AssemblyEngine
     ):
