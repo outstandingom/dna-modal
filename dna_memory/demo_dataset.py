@@ -16,9 +16,25 @@ DOMAIN_KNOWLEDGE_TRIPLES = [
     ("company_growhaz", "founded_by", "person_om_uikey"),
     ("person_om_uikey", "is_founder_of", "company_growhaz"),
     ("person_om_uikey", "has_role", "lead_ai_architect"),
+    ("person_om_uikey", "specializes_in", "ai_cybersecurity_and_fullstack"),
+    ("person_om_uikey", "contact_email", "email_info_growhaz_gmail"),
     ("company_growhaz", "headquarters", "location_india"),
     ("company_growhaz", "contact_email", "email_info_growhaz_gmail"),
     ("company_growhaz", "official_website", "url_growhaz_in"),
+    ("company_growhaz", "support_channel", "channel_whatsapp_chat"),
+    ("company_growhaz", "support_availability", "support_24_7_automated_and_human"),
+
+    # Payment & Invoicing Terms
+    ("company_growhaz", "accepts_payment_method", "payment_upi"),
+    ("company_growhaz", "accepts_payment_method", "payment_credit_debit_cards"),
+    ("company_growhaz", "accepts_payment_method", "payment_netbanking"),
+    ("company_growhaz", "accepts_payment_method", "payment_bank_transfer_neft_rtgs"),
+    ("company_growhaz", "accepts_payment_method", "payment_international_stripe"),
+    ("company_growhaz", "billing_policy", "billing_milestone_and_advance"),
+    ("company_growhaz", "provides_invoice", "tax_compliance_gst_invoice"),
+    ("payment_upi", "supported_apps", "gpay_phonepe_paytm_bhim_upi"),
+    ("payment_credit_debit_cards", "supported_cards", "visa_mastercard_rupay_amex_cards"),
+    ("payment_international_stripe", "supported_currency", "usd_eur_gbp_global_payments"),
 
     # Services provided by Growhaz
     ("company_growhaz", "provides_service", "service_alphag5_audit"),
@@ -36,15 +52,18 @@ DOMAIN_KNOWLEDGE_TRIPLES = [
     ("service_alphag5_audit", "protects_against", "vuln_idor_flaws"),
     ("service_alphag5_audit", "protects_against", "vuln_exposed_api_keys"),
     ("service_alphag5_audit", "scan_duration", "duration_5_minutes"),
-    ("service_alphag5_audit", "delivery_time", "turnaround_24_hours"),
+    ("service_alphag5_audit", "delivery_time", "turnaround_under_24_hours"),
     ("service_alphag5_audit", "has_pricing", "price_inr_4999"),
+    ("service_alphag5_audit", "includes_deliverable", "executive_remediation_pdf_guide"),
 
     ("service_alphag1_audit", "protects_against", "vuln_sql_injection"),
     ("service_alphag1_audit", "protects_against", "vuln_cross_site_scripting"),
+    ("service_alphag1_audit", "delivery_time", "turnaround_instant_5_minutes"),
     ("service_alphag1_audit", "has_pricing", "price_inr_1999"),
 
     ("service_alphag3_audit", "audit_type", "type_manual_pentest"),
     ("service_alphag3_audit", "protects_against", "vuln_zero_day"),
+    ("service_alphag3_audit", "delivery_time", "turnaround_3_to_5_business_days"),
     ("service_alphag3_audit", "has_pricing", "price_inr_9999"),
 
     # Mobile Appify Capabilities
@@ -53,15 +72,21 @@ DOMAIN_KNOWLEDGE_TRIPLES = [
     ("service_appify_mobile", "includes_feature", "feature_push_notifications"),
     ("service_appify_mobile", "includes_feature", "feature_offline_caching"),
     ("service_appify_mobile", "includes_feature", "feature_biometric_login"),
+    ("service_appify_mobile", "delivery_time", "turnaround_3_to_5_days_apk_ios"),
     ("service_appify_mobile", "has_starter_pricing", "price_inr_15000"),
     ("service_appify_mobile", "has_dual_platform_pricing", "price_inr_25000"),
 
     # Web Development Capabilities
     ("service_static_website", "seo_guarantee", "score_100_lighthouse"),
+    ("service_static_website", "delivery_time", "turnaround_5_to_7_days"),
     ("service_static_website", "has_pricing", "price_inr_20000"),
     ("service_dynamic_webapp", "includes_feature", "feature_custom_crm_dashboard"),
     ("service_dynamic_webapp", "includes_feature", "feature_payment_gateway"),
+    ("service_dynamic_webapp", "delivery_time", "turnaround_2_to_4_weeks"),
     ("service_dynamic_webapp", "has_starting_pricing", "price_inr_60000"),
+
+    # Guarantees & Remediation
+    ("company_growhaz", "service_guarantee", "guarantee_free_retest_after_patching"),
 ]
 
 # 2. Pre-Learned Customer Personas for Long-Term Memory Demonstration
@@ -143,6 +168,44 @@ def seed_demo_knowledge_base(system) -> Dict[str, Any]:
             subject_id=obj_atom.id,
             relation_type=f"inverse_{rel_type}",
             object_id=sub_atom.id,
+            confidence=1.0,
+            strength=0.9
+        )
+        encoded_relations_count += 2
+
+    # Register semantic synonyms/aliases for intuitive spreading activation
+    keyword_links = [
+        ("upi", "is_synonym_of", "payment_upi"),
+        ("google_pay", "is_synonym_of", "payment_upi"),
+        ("phonepe", "is_synonym_of", "payment_upi"),
+        ("paytm", "is_synonym_of", "payment_upi"),
+        ("credit_card", "is_synonym_of", "payment_credit_debit_cards"),
+        ("debit_card", "is_synonym_of", "payment_credit_debit_cards"),
+        ("cards", "is_synonym_of", "payment_credit_debit_cards"),
+        ("netbanking", "is_synonym_of", "payment_netbanking"),
+        ("payment", "relates_to", "company_growhaz"),
+        ("founder", "is_synonym_of", "person_om_uikey"),
+        ("om_uikey", "is_synonym_of", "person_om_uikey"),
+        ("uikey", "is_synonym_of", "person_om_uikey"),
+        ("turnaround", "relates_to", "service_alphag5_audit"),
+        ("timeline", "relates_to", "service_alphag5_audit"),
+        ("support", "relates_to", "company_growhaz"),
+        ("email", "relates_to", "company_growhaz"),
+        ("contact", "relates_to", "company_growhaz"),
+    ]
+    for kw, rel, target in keyword_links:
+        kw_atom = system.register_concept(value=kw.replace("_", " "), concept_type="query_keyword", custom_id=kw)
+        system.relation_registry.create_relation(
+            subject_id=kw_atom.id,
+            relation_type=rel,
+            object_id=target,
+            confidence=1.0,
+            strength=1.0
+        )
+        system.relation_registry.create_relation(
+            subject_id=target,
+            relation_type=f"inverse_{rel}",
+            object_id=kw_atom.id,
             confidence=1.0,
             strength=0.9
         )
