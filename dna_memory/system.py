@@ -23,6 +23,7 @@ from dna_memory.reasoning.multi_hop import FrontierReasoningEngine
 from dna_memory.learning.learning_engine import MemoryLearningEngine
 from dna_memory.prediction.behaviour_prediction import BehaviourPredictionEngine
 from dna_memory.prediction.temporal_patterns import TemporalPatternAnalyzer
+from dna_memory.memory.universal_memory import UniversalUserMemory, AgentGroundingContext
 
 class DNAMemorySystem:
     """
@@ -43,6 +44,33 @@ class DNAMemorySystem:
         self.frontier_reasoning = FrontierReasoningEngine(self.relation_registry, self.assembly_engine)
         self.learning_engine = MemoryLearningEngine(self.dna_registry, self.relation_registry, self.assembly_engine)
         self.prediction_engine = BehaviourPredictionEngine(self.learning_engine, self.relation_registry, self.assembly_engine)
+        self.user_memory = UniversalUserMemory(self.dna_registry, self.relation_registry, self.assembly_engine)
+
+    def remember_user_fact(self, user_id: str, relation_type: str, fact_value: str, confidence: float = 1.0) -> Any:
+        """Pillars 1 & 2: Encodes fact into Relational DNA (R_ABC) and recompiles UserProfile assembly."""
+        return self.user_memory.remember_fact(user_id, relation_type, fact_value, confidence)
+
+    def extract_and_remember(self, user_id: str, text: str) -> Dict[str, str]:
+        """Autonomously extracts and registers user identities, traits, and facts from natural dialogue."""
+        return self.user_memory.extract_from_dialogue(user_id, text)
+
+    def reconstruct_user_profile(self, user_id: str) -> Dict[str, str]:
+        """Pillar 3: Losslessly reconstructs complete user profile from manifest and relational graph."""
+        return self.user_memory.reconstruct_profile(user_id)
+
+    def unbind_relation(self, subject_id: str, relation_type: str) -> Optional[Tuple[str, float]]:
+        """Pillar 2: Holographic vector unbinding of a relation probe."""
+        return self.user_memory.unbind_relation(subject_id, relation_type)
+
+    def synthesize_agent_context(self, user_id: str, query_text: str, top_k: int = 5) -> AgentGroundingContext:
+        """
+        Universal context synthesizer for any AI agent:
+        1. Activates semantic memory & relational graph.
+        2. Unbinds user profile & relevant relation probes.
+        3. Constructs high-density, noise-free context for LLM prompts.
+        """
+        activated_nodes = self.search_memory(query_text, top_k=top_k)
+        return self.user_memory.synthesize_agent_grounding(user_id, query_text, activated_nodes)
 
     def register_concept(
         self,
