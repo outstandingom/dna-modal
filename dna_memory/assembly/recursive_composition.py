@@ -73,12 +73,24 @@ class AssemblyEngine:
         metadata: Optional[dict] = None,
         custom_id: Optional[str] = None
     ) -> DNAAssembly:
-        """Constructs a new hierarchical DNA assembly."""
+        """Constructs or replaces a hierarchical DNA assembly, ensuring inverted indexes are cleaned up."""
         asmb_id = custom_id or f"asmb_{assembly_type.lower()}_{self._next_asmb_seq:06d}"
-        self._next_asmb_seq += 1
+        if not custom_id:
+            self._next_asmb_seq += 1
 
         rel_ids = relation_ids or []
         w_list = weights or [1.0] * len(component_ids)
+
+        # Clean up stale index references if this assembly ID previously existed
+        version = 1
+        if asmb_id in self._assemblies:
+            old_assembly = self._assemblies[asmb_id]
+            version = old_assembly.version + 1
+            for old_cid in old_assembly.component_ids:
+                if old_cid in self._component_to_assemblies:
+                    self._component_to_assemblies[old_cid].discard(asmb_id)
+                    if not self._component_to_assemblies[old_cid]:
+                        del self._component_to_assemblies[old_cid]
 
         # Compute initial cached vector
         vector = self._compute_assembly_vector(component_ids, rel_ids, w_list)
@@ -90,7 +102,7 @@ class AssemblyEngine:
             relation_ids=list(rel_ids),
             weights=list(w_list),
             vector=vector,
-            version=1,
+            version=version,
             metadata=metadata or {}
         )
 

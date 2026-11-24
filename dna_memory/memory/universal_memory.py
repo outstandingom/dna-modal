@@ -9,6 +9,9 @@ Consolidates the three core pillars of the DNA Cognitive Architecture:
 from dataclasses import dataclass, field
 from typing import Dict, Any, List, Optional, Tuple
 import datetime
+import hashlib
+import json
+import os
 import re
 import numpy as np
 
@@ -61,17 +64,54 @@ class UniversalUserMemory:
     """
     Universal Cognitive Long-Term User Memory Engine.
     Operates across any AI agent, channel, or application.
+    Integrates Concept Identity, Relationship Lifecycle, and Authoritative Manifests.
     """
     def __init__(
         self,
         dna_registry: DNARegistry,
         relation_registry: RelationRegistry,
-        assembly_engine: AssemblyEngine
+        assembly_engine: AssemblyEngine,
+        lifecycle_engine: Optional[Any] = None,
+        temporal_engine: Optional[Any] = None,
+        concept_registry: Optional[Any] = None
     ):
         self.dna_registry = dna_registry
         self.relation_registry = relation_registry
         self.assembly_engine = assembly_engine
+        self.lifecycle_engine = lifecycle_engine
+        self.temporal_engine = temporal_engine
+        self.concept_registry = concept_registry
         self._user_manifests: Dict[str, UserMemoryManifest] = {}
+
+    def get_manifest(self, user_id: str) -> Optional[UserMemoryManifest]:
+        """Returns the authoritative manifest for a user if registered."""
+        return self._user_manifests.get(str(user_id).strip())
+
+    def save_manifest(self, user_id: str, filepath: str) -> bool:
+        """Serializes the authoritative user manifest to a JSON file."""
+        manifest = self.get_manifest(user_id)
+        if not manifest:
+            return False
+        os.makedirs(os.path.dirname(os.path.abspath(filepath)), exist_ok=True)
+        with open(filepath, "w", encoding="utf-8") as f:
+            json.dump(manifest.to_dict(), f, indent=2)
+        return True
+
+    def load_manifest(self, filepath: str) -> UserMemoryManifest:
+        """Loads and activates an authoritative user manifest from disk."""
+        with open(filepath, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        manifest = UserMemoryManifest(
+            user_id=data["user_id"],
+            identity_facts=data.get("identity_facts", {}),
+            preferences=data.get("preferences", {}),
+            relations=data.get("relations", []),
+            last_updated=data.get("last_updated", datetime.datetime.now(datetime.timezone.utc).isoformat()),
+            version=data.get("version", 1),
+            metadata=data.get("metadata", {})
+        )
+        self._user_manifests[manifest.user_id] = manifest
+        return manifest
 
     def remember_fact(
         self,
@@ -79,35 +119,84 @@ class UniversalUserMemory:
         relation_type: str,
         fact_value: str,
         confidence: float = 1.0,
-        source: str = "dialogue"
+        source: str = "dialogue",
+        valid_from: Optional[str] = None
     ) -> RelationDNA:
         """
-        Encodes a single fact into Relational DNA (R_ABC) and recompiles the User Profile Assembly.
+        Encodes a single fact into Relational DNA with collision-safe ID generation,
+        supersession handling for contradictory updates, authoritative manifest tracking,
+        and atomic profile assembly recompilation.
         """
         clean_user_id = str(user_id).strip()
         clean_val = str(fact_value).strip()
         rel_type = str(relation_type).strip().lower()
+        now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        v_from = valid_from or now_iso
 
-        # 1. Register/Retrieve User Concept Atom
+        # 1. Register/Retrieve User Concept Atom safely
         self.dna_registry.register(
             value=clean_user_id,
             dna_type="customer",
             source="user_memory",
             custom_id=clean_user_id
         )
+        if self.concept_registry:
+            self.concept_registry.mint_id(clean_user_id, concept_type="customer", source="user_memory")
 
-        # 2. Register/Retrieve Fact Value Atom
-        slug = re.sub(r'[^a-z0-9_]', '', clean_val.lower().replace(' ', '_'))[:30]
-        fact_id = f"fact_{rel_type}_{slug}"
+        # 2. Collision-safe Fact ID generation using SHA-256 content hash
+        val_hash = hashlib.sha256(f"{clean_val}:{rel_type}".encode('utf-8')).hexdigest()[:8]
+        slug = re.sub(r'[^a-z0-9_]', '', clean_val.lower().replace(' ', '_'))[:20]
+        fact_id = f"fact_{rel_type}_{slug}_{val_hash}"
+
         fact_atom = self.dna_registry.register(
             value=clean_val,
             dna_type="customer_attribute",
             source=source,
             confidence=confidence,
-            custom_id=fact_id
+            custom_id=fact_id,
+            allow_overwrite=True
         )
+        if self.concept_registry:
+            self.concept_registry.mint_id(clean_val, concept_type="customer_attribute", source=source)
 
-        # 3. Create First-Class Relational DNA: R_ABC = bind(bind(User, rel_type), Fact)
+        # 3. Handle Lifecycle Supersession & Contradiction Resolution
+        # Single-valued attributes supersede prior conflicting facts for the same subject
+        single_value_relations = {"has_name", "has_company", "works_at", "has_role", "has_website", "favorite_color", "location"}
+        is_single_valued = rel_type in single_value_relations or rel_type.startswith("has_") or rel_type.startswith("is_")
+
+        if self.lifecycle_engine and is_single_valued:
+            # Query existing active relations for this subject and relation_type
+            active_existing = self.lifecycle_engine.query_relationships(
+                subject_id=clean_user_id,
+                predicate=rel_type,
+                status="ACTIVE"
+            )
+            superseded = False
+            for old_rel in active_existing:
+                # If the object changed, supersede the older relationship
+                if old_rel.object_id != fact_atom.id:
+                    self.lifecycle_engine.supersede_relationship(
+                        old_relationship_id=old_rel.relationship_id,
+                        new_object_id=fact_atom.id,
+                        source=source,
+                        evidence_content=f"Updated via dialogue fact: {clean_val}",
+                        effective_time=v_from
+                    )
+                    superseded = True
+
+            # Record in lifecycle engine if not already created by supersession
+            if not superseded:
+                self.lifecycle_engine.create_relationship(
+                    subject_id=clean_user_id,
+                    predicate=rel_type,
+                    object_id=fact_atom.id,
+                    confidence=confidence,
+                    source=source,
+                    evidence_content=f"Observed in {source}: {clean_val}",
+                    valid_from=v_from
+                )
+
+        # 4. Create First-Class Relational DNA: R_ABC = bind(bind(User, rel_type), Fact)
         rel = self.relation_registry.create_relation(
             subject_id=clean_user_id,
             relation_type=rel_type,
@@ -125,7 +214,24 @@ class UniversalUserMemory:
             strength=0.9
         )
 
-        # 4. Pillar 1 & 3: Recompile the UserProfile Assembly (Recursive Composition)
+        # 5. Authoritative Manifest Population & Versioning
+        if clean_user_id not in self._user_manifests:
+            self._user_manifests[clean_user_id] = UserMemoryManifest(
+                user_id=clean_user_id,
+                identity_facts={},
+                preferences={},
+                relations=[],
+                last_updated=now_iso,
+                version=1
+            )
+        manifest = self._user_manifests[clean_user_id]
+        manifest.identity_facts[rel_type] = clean_val
+        if rel.id not in manifest.relations:
+            manifest.relations.append(rel.id)
+        manifest.last_updated = now_iso
+        manifest.version += 1
+
+        # 6. Recompile UserProfile Assembly cleanly
         self._recompile_user_profile_assembly(clean_user_id)
 
         return rel
@@ -167,13 +273,33 @@ class UniversalUserMemory:
 
     def reconstruct_profile(self, user_id: str) -> Dict[str, str]:
         """
-        Pillar 3: Lossless Structural Reconstruction via Manifest & Relational Graph.
+        Pillar 3: Lossless Structural Reconstruction via Authoritative Manifest & Relational Graph.
+        Respects lifecycle supersession: superseded facts are excluded.
         """
         clean_user_id = str(user_id).strip()
-        rels = self.relation_registry.retrieve_relations(subject_id=clean_user_id)
-        # Sort by creation sequence so latest updates take absolute priority
-        rels.sort(key=lambda r: r.id)
+
+        # If authoritative manifest exists, start with verified identity facts
         facts = {}
+        manifest = self._user_manifests.get(clean_user_id)
+        if manifest and manifest.identity_facts:
+            facts.update(manifest.identity_facts)
+
+        # If lifecycle engine is connected, verify active state
+        if self.lifecycle_engine:
+            active_rels = self.lifecycle_engine.query_relationships(
+                subject_id=clean_user_id,
+                status="ACTIVE"
+            )
+            for r in active_rels:
+                if not r.predicate.startswith("inverse_") and not r.predicate.startswith("is_"):
+                    obj_atom = self.dna_registry.get(r.object_id)
+                    val = obj_atom.value if obj_atom else r.object_id
+                    facts[r.predicate] = val
+            return facts
+
+        # Fallback to relation_registry with newest-first ordering
+        rels = self.relation_registry.retrieve_relations(subject_id=clean_user_id)
+        rels.sort(key=lambda r: r.id)
         for r in reversed(rels):
             if r.relation_type not in facts and not r.relation_type.startswith("inverse_") and not r.relation_type.startswith("is_"):
                 obj_atom = self.dna_registry.get(r.object_id)
@@ -182,7 +308,8 @@ class UniversalUserMemory:
 
     def _recompile_user_profile_assembly(self, user_id: str):
         """
-        Pillar 1: Recursively compiles UserProfile Assembly from constituent fact atoms.
+        Pillar 1: Recursively compiles UserProfile Assembly from constituent fact atoms,
+        updating inverted indexes and cache entries cleanly.
         """
         clean_user_id = str(user_id).strip()
         rels = self.relation_registry.retrieve_relations(subject_id=clean_user_id)

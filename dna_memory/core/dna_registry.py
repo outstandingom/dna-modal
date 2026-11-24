@@ -27,16 +27,35 @@ class DNARegistry:
         source: str = "observation",
         confidence: float = 1.0,
         metadata: Optional[DNAFeatureMetadata] = None,
-        custom_id: Optional[str] = None
+        custom_id: Optional[str] = None,
+        allow_overwrite: bool = False
     ) -> AtomicDNA:
-        """Register or retrieve an atomic DNA representation."""
+        """Register or retrieve an atomic DNA representation with collision safety."""
         key = (dna_type, str(value).lower().strip())
-        if key in self._by_value_type and not custom_id:
+        
+        # Check if already registered by value and type
+        if key in self._by_value_type:
             existing_id = self._by_value_type[key]
-            return self._by_id[existing_id]
+            if not custom_id or existing_id == custom_id:
+                return self._by_id[existing_id]
 
         atom_id = custom_id or f"dna_{dna_type[:3]}_{self._next_seq:06d}"
-        self._next_seq += 1
+        if not custom_id:
+            self._next_seq += 1
+
+        # Check for ID collisions if custom_id was provided
+        if custom_id and custom_id in self._by_id:
+            existing_atom = self._by_id[custom_id]
+            if str(existing_atom.value).strip().lower() == str(value).strip().lower() and existing_atom.type == dna_type:
+                return existing_atom
+            if not allow_overwrite:
+                raise ValueError(
+                    f"ID collision detected: Atom ID '{custom_id}' already exists for value '{existing_atom.value}' "
+                    f"({existing_atom.type}). Cannot silently overwrite with '{value}' ({dna_type})."
+                )
+            # Safe overwrite: remove old value-type mapping
+            old_key = (existing_atom.type, str(existing_atom.value).lower().strip())
+            self._by_value_type.pop(old_key, None)
 
         if vector is None:
             vector = self.encoder.encode_concept(dna_type, str(value))
@@ -66,6 +85,22 @@ class DNARegistry:
     def get(self, atom_id: str) -> Optional[AtomicDNA]:
         """Lookup by ID."""
         return self._by_id.get(atom_id)
+
+    def has(self, atom_id: str) -> bool:
+        """Check if an atom exists by ID."""
+        return atom_id in self._by_id
+
+    def __contains__(self, atom_id: str) -> bool:
+        return atom_id in self._by_id
+
+    def unregister(self, atom_id: str) -> bool:
+        """Removes an atom from the registry."""
+        if atom_id in self._by_id:
+            atom = self._by_id.pop(atom_id)
+            key = (atom.type, str(atom.value).lower().strip())
+            self._by_value_type.pop(key, None)
+            return True
+        return False
 
     def find_by_value(self, value: str, dna_type: str = "property") -> Optional[AtomicDNA]:
         """Lookup by (type, value)."""

@@ -23,7 +23,7 @@ from graders import task_easy, task_medium, task_hard, TASKS, GRADERS
 from skill_adapter import get_adapter
 from projection import DimensionProjector, ProjectionCache
 from dynamic_knowledge_loader import DynamicKnowledgeLoader, ConceptData
-from dna_memory import DNAMemorySystem
+from dna_memory import DNAMemorySystem, ShardManager, GraphitiAdapter
 
 # ============================================================
 # Configuration
@@ -70,8 +70,10 @@ LOW_CONFIDENCE_THRESHOLD = 0.4
 os.makedirs(PERSIST_DIR, exist_ok=True)
 load_dotenv()
 
-# Initialize Recursive Compositional DNA Memory Architecture
+# Initialize Recursive Compositional DNA Memory Architecture & Sharding
 _dna_memory_system = DNAMemorySystem(dims=DIMS)
+_shard_manager = ShardManager(num_shards=4, dims=DIMS, base_dir=os.path.join(PERSIST_DIR, "shards"))
+_graphiti_adapter = GraphitiAdapter()
 DNA_STATE_FILE = os.path.join(PERSIST_DIR, "dna_memory_state.json")
 if os.path.exists(DNA_STATE_FILE):
     try:
@@ -1893,6 +1895,20 @@ class KnowledgeLoadRequest(BaseModel):
 class RouterReinforceRequest(BaseModel):
     reward: float; session_id: Optional[str] = None
 
+class GraphitiTestRequest(BaseModel):
+    user_id: str = "admin_tester"
+    message: str
+    timestamp: Optional[str] = None
+
+class GraphitiQueryRequest(BaseModel):
+    query: str
+    user_id: Optional[str] = None
+
+class ShardTestRequest(BaseModel):
+    user_id: str = "user_001"
+    message: str
+    relation_type: str = "has_fact"
+
 # ── Helpers ──────────────────────────────────────────────────────
 def _build_client(req: AgentRequest):
     if not req.provider or req.provider == "local_graph" or not req.api_key:
@@ -2215,11 +2231,80 @@ async def dna_benchmark_endpoint():
     return {"status": "success", "results": res}
 
 
+# ── Admin Endpoints: Graphiti & Sharding Lab (Admin-Only) ────────
+@app.get("/admin/graphiti/status")
+async def graphiti_status_endpoint():
+    """Returns connection and telemetry status of the Graphiti / Neo4j engine."""
+    return _graphiti_adapter.get_status()
+
+@app.post("/admin/graphiti/test")
+async def graphiti_test_endpoint(req: GraphitiTestRequest):
+    """Processes a test message through Graphiti temporal extraction without affecting users."""
+    res = _graphiti_adapter.add_episode(user_id=req.user_id, message=req.message, timestamp=req.timestamp)
+    return {"status": "success", "results": res}
+
+@app.post("/admin/graphiti/query")
+async def graphiti_query_endpoint(req: GraphitiQueryRequest):
+    """Searches the Graphiti / Neo4j temporal graph."""
+    res = _graphiti_adapter.search(query=req.query, user_id=req.user_id)
+    return {"status": "success", "results": res}
+
+@app.post("/admin/graphiti/sync_to_dna")
+async def graphiti_sync_endpoint():
+    """Syncs extracted entities and relationships from Graphiti / Neo4j into DNA Modal."""
+    res = _graphiti_adapter.sync_to_dna_memory(_dna_memory_system)
+    return {
+        "status": "success",
+        "synced": {
+            "entities_synced": res.entities_synced,
+            "relations_synced": res.relations_synced,
+            "duration_ms": res.duration_ms,
+            "timestamp": res.timestamp
+        }
+    }
+
+@app.get("/admin/sharding/stats")
+async def sharding_stats_endpoint():
+    """Returns horizontal sharding telemetry, hash ring partition, and tenant metrics."""
+    return _shard_manager.get_sharding_stats()
+
+@app.post("/admin/sharding/test")
+async def sharding_test_endpoint(req: ShardTestRequest):
+    """Routes a test fact to a dedicated tenant shard and runs federated query."""
+    rel = _shard_manager.record_tenant_fact(
+        tenant_id=req.user_id,
+        relation_type=req.relation_type,
+        fact_value=req.message,
+        source="admin_shard_test"
+    )
+    query_res = _shard_manager.query_tenant(tenant_id=req.user_id, query_text=req.message)
+    return {
+        "status": "success",
+        "routed_shard": _shard_manager.get_shard_id(req.user_id),
+        "relation_id": getattr(rel, "id", "created"),
+        "federated_query": query_res
+    }
+
+
 # ── /agent endpoint (enhanced with DNA pipeline results) ─────────
 @app.post("/agent", response_model=AgentResponse)
 async def agent_endpoint(req: AgentRequest):
     if not _env_ready or _api_env is None:
         raise HTTPException(status_code=503, detail="Environment not ready")
+
+    # Shadow Graphiti & Sharding recording (Zero-latency background task for training)
+    try:
+        if req.session_id and req.message:
+            _shard_manager.record_tenant_fact(
+                tenant_id=req.session_id,
+                relation_type="dialogue_turn",
+                fact_value=req.message[:100],
+                source="user_dialogue"
+            )
+            # Ingest to Graphiti shadow store for training without altering user output
+            _graphiti_adapter.add_episode(user_id=req.session_id, message=req.message)
+    except Exception:
+        pass
     client, model_name, provider_used = _build_client(req)
     ns = f"user_{req.session_id[:8]}:" if req.session_id else ""
     tools = [

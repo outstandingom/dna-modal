@@ -14,10 +14,10 @@ While standard RAG (Vector Databases) is useful for retrieving exact quotes from
 
 | Feature | Standard RAG (Vector DB) | DNA Knowledge Graph (GraphRAG) |
 | :--- | :--- | :--- |
-| **Token Efficiency** | ❌ **Terrible.** Stuffs raw, 500-word paragraphs into prompts full of filler words ("the", "and"). | ✅ **Perfect.** Injects highly compressed, structured concepts. Drastically reduces token usage and cost. |
+| **Token Efficiency** | ❌ **High Overhead.** Stuffs raw, 500-word paragraphs into prompts full of filler words ("the", "and"). | ✅ **High Compression.** Injects structured relational triples and verified profile facts, reducing token overhead. |
 | **Reasoning** | ❌ **Dumb Search.** Matches text embeddings. Cannot connect logical dots if words aren't in the same paragraph. | ✅ **Multi-Hop Logic.** Can walk bonds (`A->B->C`) to answer complex deductive questions standard RAG fails at. |
-| **Dynamic Learning** | ❌ **Static.** Requires developers to manually embed and upload new documents. | ✅ **Organic.** Learns instantly during chat. Updates physical and semantic vectors dynamically like a human brain. |
-| **Offline Cost** | ❌ Requires paid embedding models to parse data. | ✅ **Zero-Token Background.** Uses a local offline `DynamicKnowledgeLoader` to map concepts for free. |
+| **Dynamic Learning** | ❌ **Static.** Requires developers to manually embed and upload new documents. | ✅ **Bi-Temporal Lifecycle.** Records dialogue observations with explicit validity intervals, superseding stale facts. |
+| **Offline Cost** | ❌ Requires paid embedding models to parse data. | ✅ **Zero-Token Background.** Uses local offline algebraic HRR vector binding without token costs. |
 
 ## 🏗️ Architecture & Features
 
@@ -27,12 +27,12 @@ This engine operates strictly as a memory layer. It does not have global LLM API
 - Supports **OpenAI, Google Gemini, Groq, DeepSeek, and HuggingFace**.
 
 ### 2. Multi-Tenant Memory Isolation (`session_id`)
-You can host a single instance of this backend for a million users. When the frontend sends a request, it includes a unique UUID (`session_id`). The graph instantly creates a private, isolated namespace for that user (e.g., `user_123e4567:concept`). Users will perfectly resume their memory state across sessions, and memories are never cross-contaminated.
+Namespaces are partitioned per user session ID (`user_<session_id>:<concept>`). Users resume their memory state across sessions without cross-contamination.
 
-### 3. Dual-Layer Vectors
-Concepts are stored using a biological DNA approach:
-- **Physical Features (12-dim):** Fast, immediate heuristic routing.
-- **Semantic Features (128-dim):** Deep, nuanced context understanding.
+### 3. Dual-Engine Architecture (v2.1.0 Bridge)
+The repository coordinates two complementary cognitive subsystems via `SineBrainBridge`:
+- **System A (`dna_memory/`):** Compositional Long-Term Memory. Owns canonical concept identity, relationship lifecycle, bi-temporal validity, hierarchical assemblies, authoritative manifests, and multi-channel hybrid retrieval.
+- **System B (`knowledge_graph_env.py`):** Adaptive Continuous Brain. Owns 26-letter alphabet sine-based positional encoding, Hebbian synaptic association, and 12-dimensional predictive routing.
 
 ### 4. Single Orchestrator Architecture
 The frontend only ever has to talk to two endpoints:
@@ -92,6 +92,7 @@ If you want to test it completely for free:
 ## 🔬 Research & Benchmarks
 
 For in-depth mathematical proofs, empirical capacity experiments, and hold-out customer memory validation:
+- 🏛️ **[DNA Modal v2.1.0 Architecture Report & Audit Resolutions](./DNA_MODAL_V2_ARCHITECTURE_REPORT.md)**: Full report covering Phase 1–4 engines, audit resolutions (identity collision, relationship lifecycle, manifest persistence, index cleanup, dual-system bridge), and 5-regime empirical benchmarks.
 - 📊 **[Full Benchmark & Validation Report](./RECURSIVE_COMPOSITIONAL_DNA_BENCHMARK.md)**: Multi-dimensional capacity benchmarks (128D, 512D, 1024D) & 100% hold-out predictive accuracy.
 - 📄 **[Research Paper: DNA Knowledge Graph](./RESEARCH_PAPER_DNA_KNOWLEDGE_GRAPH.md)**: Comprehensive architectural specification and mathematical foundations.
 - 💡 **[Why DNA Knowledge Graph Beats Vector RAG](./WHY_DNA_KNOWLEDGE_GRAPH_BEATS_VECTOR_RAG.md)**: Cost, token reduction, and reasoning analysis.
