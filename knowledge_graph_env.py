@@ -1749,6 +1749,11 @@ def _boot_env():
     global _api_env, _env_ready
     try:
         _api_env   = KnowledgeGraphEnv(start_trainer=True)
+        try:
+            from supabase_sync import hydrate_graph_from_supabase
+            hydrate_graph_from_supabase(_api_env)
+        except Exception as se:
+            print(f"[WARN] Supabase hydrate skipped: {se}")
         _env_ready = True
     except Exception as e:
         print(f"[WARN] KnowledgeGraphEnv boot failed: {e}")
@@ -2000,6 +2005,12 @@ async def add_relationship_endpoint(req: AddRelationshipRequest):
             _api_env.concept_memory.register(c, pf, sf)
     _api_env.concept_memory.add_weighted_relationship(
         req.concept_a, req.concept_b, weight=req.weight, color=req.color)
+    try:
+        from supabase_sync import persist_relationship_async
+        tenant_id = req.concept_a.split(":", 1)[0] if ":" in req.concept_a else "default"
+        persist_relationship_async(req.concept_a, req.concept_b, relation=req.color, tenant_id=tenant_id)
+    except Exception:
+        pass
     return AddRelationshipResponse(status="relationship_added")
 
 @app.get("/concepts")
@@ -2013,11 +2024,11 @@ async def list_concepts_endpoint(limit: int = 100):
 @app.get("/graph")
 async def get_graph_endpoint(session_id: Optional[str] = None):
     if _api_env is None: raise HTTPException(status_code=503)
-    ns    = f"user_{session_id[:8]}:" if session_id else ""
+    ns    = f"{session_id}:" if (session_id and ":" not in session_id) else (session_id or "")
     nodes = []; links = []
     for name, concept in _api_env.concept_memory.concepts.items():
         if ns and not name.startswith(ns): continue
-        display = name.replace(ns,"") if ns else name
+        display = name.replace(ns,"",1) if ns else name
         nodes.append({"id":display,"domain":getattr(concept,"domain","general"),
                       "importance":getattr(concept,"importance",1.0)})
     for source, targets in _api_env.concept_memory.weighted_relationships.items():
